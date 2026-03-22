@@ -1,26 +1,271 @@
 @import "tailwindcss";
 
+/* ── Design System: Fluid Intelligence (WhatsApp Booking Agent) ── */
+/* Colors sourced from Stitch Veridian Sync project: projects/4554366267210676563 */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Surface Architecture */
+  --background: #f6faff;
+  --foreground: #141d24;
+  --surface: #f6faff;
+  --surface-container-lowest: #ffffff;
+  --surface-container-low: #ebf5ff;
+  --surface-container: #e6eff9;
+  --surface-container-high: #e0e9f3;
+  --surface-container-highest: #dae4ed;
+  --surface-dim: #d2dbe5;
+  --surface-bright: #f6faff;
+  --surface-variant: #dae4ed;
+
+  /* Primary - WhatsApp Green */
+  --primary: #006d2f;
+  --primary-container: #25d366;
+  --primary-fixed: #66ff8e;
+  --primary-fixed-dim: #3de273;
+  --on-primary: #ffffff;
+  --on-primary-container: #005523;
+
+  /* Secondary */
+  --secondary: #1c695f;
+  --secondary-container: #a5ede0;
+  --secondary-fixed-dim: #8cd4c7;
+  --on-secondary: #ffffff;
+  --on-secondary-container: #226e63;
+
+  /* Tertiary */
+  --tertiary: #006b5f;
+  --tertiary-container: #63c9b9;
+  --on-tertiary: #ffffff;
+  --on-tertiary-container: #005249;
+
+  /* Status */
+  --error: #ba1a1a;
+  --error-container: #ffdad6;
+  --on-error: #ffffff;
+
+  /* Text & Icons */
+  --on-background: #141d24;
+  --on-surface: #141d24;
+  --on-surface-variant: #3c4a3d;
+  --outline: #6c7b6b;
+  --outline-variant: #bbcbb9;
+
+  /* Surface Tint */
+  --surface-tint: #006d2f;
+  --inverse-primary: #3de273;
+  --inverse-surface: #283139;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0d1117;
+    --foreground: #e0e9f3;
+    --surface: #0d1117;
+    --surface-container-lowest: #060e0a;
+    --surface-container-low: #141d18;
+    --surface-container: #1a2420;
+    --surface-container-high: #202c26;
+    --surface-container-highest: #263330;
+    --surface-dim: #0d1117;
+    --surface-bright: #303d38;
+
+    --primary: #3de273;
+    --primary-container: #005523;
+    --primary-fixed: #66ff8e;
+    --primary-fixed-dim: #3de273;
+    --on-primary: #003918;
+    --on-primary-container: #66ff8e;
+
+    --secondary: #8cd4c7;
+    --secondary-container: #005047;
+    --secondary-fixed-dim: #8cd4c7;
+    --on-secondary: #00201c;
+    --on-secondary-container: #a5ede0;
+
+    --tertiary: #72d8c8;
+    --tertiary-container: #005249;
+    --on-tertiary: #00201c;
+    --on-tertiary-container: #8ff4e3;
+
+    --on-background: #dae4ed;
+    --on-surface: #dae4ed;
+    --on-surface-variant: #bbcbb9;
+    --outline: #8a9a89;
+    --outline-variant: #3c4a3d;
+
+    --surface-tint: #3de273;
+    --inverse-primary: #006d2f;
+    --inverse-surface: #dae4ed;
+  }
+}
+
+[data-theme="dark"] {
+  --background: #0d1117;
+  --foreground: #e0e9f3;
+  --surface: #0d1117;
+  --surface-container-lowest: #060e0a;
+  --surface-container-low: #141d18;
+  --surface-container: #1a2420;
+  --surface-container-high: #202c26;
+  --surface-container-highest: #263330;
+  --surface-dim: #0d1117;
+  --surface-bright: #303d38;
+
+  --primary: #3de273;
+  --primary-container: #005523;
+  --on-primary: #003918;
+  --on-primary-container: #66ff8e;
+
+  --secondary: #8cd4c7;
+  --secondary-container: #005047;
+  --on-secondary: #00201c;
+  --on-secondary-container: #a5ede0;
+
+  --tertiary: #72d8c8;
+  --tertiary-container: #005249;
+  --on-surface: #dae4ed;
+  --on-surface-variant: #bbcbb9;
+  --outline: #8a9a89;
+  --outline-variant: #3c4a3d;
+}
+
+[data-theme="light"] {
+  --background: #f6faff;
+  --foreground: #141d24;
+  --surface: #f6faff;
+  --surface-container-lowest: #ffffff;
+  --surface-container-low: #ebf5ff;
+  --surface-container: #e6eff9;
+  --surface-container-high: #e0e9f3;
+  --surface-container-highest: #dae4ed;
+  --surface-dim: #d2dbe5;
+
+  --primary: #006d2f;
+  --primary-container: #25d366;
+  --on-primary: #ffffff;
+  --on-primary-container: #005523;
+
+  --secondary: #1c695f;
+  --secondary-container: #a5ede0;
+  --on-secondary: #ffffff;
+  --on-secondary-container: #226e63;
+
+  --tertiary: #006b5f;
+  --tertiary-container: #63c9b9;
+  --on-surface: #141d24;
+  --on-surface-variant: #3c4a3d;
+  --outline: #6c7b6b;
+  --outline-variant: #bbcbb9;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-surface: var(--surface);
+  --color-surface-low: var(--surface-container-low);
+  --color-surface-container: var(--surface-container);
+  --color-surface-high: var(--surface-container-high);
+  --color-surface-highest: var(--surface-container-highest);
+  --color-surface-lowest: var(--surface-container-lowest);
+  --color-primary: var(--primary);
+  --color-primary-container: var(--primary-container);
+  --color-on-primary: var(--on-primary);
+  --color-secondary: var(--secondary);
+  --color-secondary-container: var(--secondary-container);
+  --color-tertiary: var(--tertiary);
+  --color-tertiary-container: var(--tertiary-container);
+  --color-on-surface: var(--on-surface);
+  --color-on-surface-variant: var(--on-surface-variant);
+  --color-outline: var(--outline);
+  --color-outline-variant: var(--outline-variant);
+  --color-error: var(--error);
+  --font-sans: var(--font-manrope);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
 }
 
 body {
   background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  color: var(--on-surface);
+  font-family: var(--font-manrope), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--outline-variant);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--outline);
+}
+
+/* Smooth transitions for theme switch */
+*, *::before, *::after {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+/* No-border rule – use tonal layering */
+.card {
+  background: var(--surface-container-lowest);
+  border-radius: 1.5rem;
+  box-shadow: 0px 12px 32px rgba(20, 29, 36, 0.06);
+}
+
+.card-sm {
+  background: var(--surface-container-lowest);
+  border-radius: 1rem;
+  box-shadow: 0px 8px 20px rgba(20, 29, 36, 0.04);
+}
+
+/* Gradient primary button */
+.btn-primary {
+  background: linear-gradient(135deg, var(--primary), var(--primary-container));
+  color: var(--on-primary);
+  border-radius: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: opacity 0.2s ease, transform 0.1s ease;
+}
+.btn-primary:hover {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+
+/* AI status chip */
+.chip-active {
+  background: var(--primary-fixed-dim, #3de273);
+  color: var(--on-primary-container, #005523);
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.75rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Glass effect for floating elements */
+.glass {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+[data-theme="dark"] .glass {
+  background: rgba(255, 255, 255, 0.06);
 }
