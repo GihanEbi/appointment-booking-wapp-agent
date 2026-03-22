@@ -14,12 +14,14 @@ import {
   Zap,
   ChevronLeft,
   ChevronRight,
+  UserCircle2,
 } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
 
 const navItems = [
   { href: "/", icon: LayoutDashboard, label: "Dashboard" },
+  { href: "/my-details", icon: UserCircle2, label: "My Details" },
   { href: "/appointments", icon: CalendarDays, label: "Appointments" },
   { href: "/ai-chats", icon: MessageCircle, label: "AI Chats" },
   { href: "/notifications", icon: Bell, label: "Notifications" },
