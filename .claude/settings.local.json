@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx skills add:*)",
+      "Bash(supabase --version:*)",
+      "Bash(curl:*)",
+      "Bash(psql:*)",
+      "Bash(npx supabase:*)",
+      "Bash(node -e \":*)",
+      "Bash(node -e \"const ai = require\\(''''ai''''\\); console.log\\(Object.keys\\(ai\\).filter\\(k => k.toLowerCase\\(\\).includes\\(''''step''''\\) || k.toLowerCase\\(\\).includes\\(''''round''''\\)\\)\\)\")"
+    ]
+  }
+}
