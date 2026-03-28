@@ -9,11 +9,12 @@
       "Bash(psql:*)",
       "Bash(npx supabase:*)",
       "Bash(node -e \":*)",
-      "Bash(node -e \"const ai = require\\(''''ai''''\\); console.log\\(Object.keys\\(ai\\).filter\\(k => k.toLowerCase\\(\\).includes\\(''''step''''\\) || k.toLowerCase\\(\\).includes\\(''''round''''\\)\\)\\)\")"
+      "Bash(node -e \"const ai = require\\(''''ai''''\\); console.log\\(Object.keys\\(ai\\).filter\\(k => k.toLowerCase\\(\\).includes\\(''''step''''\\) || k.toLowerCase\\(\\).includes\\(''''round''''\\)\\)\\)\")",
+      "Bash(node scripts/generate-icons.mjs)"
     ]
   },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "supabase"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }

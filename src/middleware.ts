@@ -5,7 +5,7 @@ import { NextResponse, type NextRequest } from "next/server";
 const BYPASS_PREFIXES = ["/api/", "/_next", "/favicon.ico"];
 
 // Pages that are publicly accessible (unauthenticated)
-const PUBLIC_PAGES = ["/login", "/staff/login"];
+const PUBLIC_PAGES = ["/login", "/staff/login", "/offline"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
