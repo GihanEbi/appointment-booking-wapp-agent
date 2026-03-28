@@ -1,15 +1,12 @@
 const CACHE = "concierge-ai-v1";
 
-// Static assets to pre-cache on install
-const PRECACHE = ["/", "/offline"];
-
 self.addEventListener("install", (e) => {
-  e.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(PRECACHE)).then(() => self.skipWaiting())
-  );
+  // Skip waiting so the new SW activates immediately
+  e.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener("activate", (e) => {
+  // Remove old caches and take control immediately
   e.waitUntil(
     caches
       .keys()
@@ -24,7 +21,7 @@ self.addEventListener("fetch", (e) => {
   const { request } = e;
   const url = new URL(request.url);
 
-  // Never intercept: non-GET, API routes, Supabase, HMR
+  // Never intercept: non-GET, API calls, Supabase, HMR websocket
   if (
     request.method !== "GET" ||
     url.pathname.startsWith("/api/") ||
@@ -38,33 +35,25 @@ self.addEventListener("fetch", (e) => {
   if (url.pathname.startsWith("/_next/static/")) {
     e.respondWith(
       caches.match(request).then(
-        (cached) => cached ?? fetch(request).then((res) => {
-          if (res.ok) {
-            const clone = res.clone();
-            caches.open(CACHE).then((c) => c.put(request, clone));
-          }
-          return res;
-        })
+        (cached) =>
+          cached ??
+          fetch(request).then((res) => {
+            if (res.ok) {
+              const clone = res.clone();
+              caches.open(CACHE).then((c) => c.put(request, clone));
+            }
+            return res;
+          })
       )
     );
     return;
   }
 
-  // Navigation — network first, fall back to cached page or /offline
-  if (request.mode === "navigate") {
-    e.respondWith(
-      fetch(request).catch(() =>
-        caches.match(request).then((cached) => cached ?? caches.match("/offline"))
-      )
-    );
-    return;
-  }
-
-  // Everything else — network first, cache on success
+  // Everything else — network first, cache on success for offline fallback
   e.respondWith(
     fetch(request)
       .then((res) => {
-        if (res.ok) {
+        if (res.ok && request.mode === "navigate") {
           const clone = res.clone();
           caches.open(CACHE).then((c) => c.put(request, clone));
         }
