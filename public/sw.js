@@ -1,12 +1,17 @@
 const CACHE = "concierge-ai-v1";
+const OFFLINE_URL = "/offline.html";
 
 self.addEventListener("install", (e) => {
-  // Skip waiting so the new SW activates immediately
-  e.waitUntil(self.skipWaiting());
+  // Pre-cache the offline fallback — this is what Chrome checks for "works offline"
+  e.waitUntil(
+    caches
+      .open(CACHE)
+      .then((c) => c.add(OFFLINE_URL))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener("activate", (e) => {
-  // Remove old caches and take control immediately
   e.waitUntil(
     caches
       .keys()
@@ -21,7 +26,7 @@ self.addEventListener("fetch", (e) => {
   const { request } = e;
   const url = new URL(request.url);
 
-  // Never intercept: non-GET, API calls, Supabase, HMR websocket
+  // Skip: non-GET, API calls, Supabase, HMR
   if (
     request.method !== "GET" ||
     url.pathname.startsWith("/api/") ||
@@ -31,7 +36,7 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
-  // Next.js static assets — cache first, then network
+  // Next.js static chunks — cache first for fast loads
   if (url.pathname.startsWith("/_next/static/")) {
     e.respondWith(
       caches.match(request).then(
@@ -39,8 +44,7 @@ self.addEventListener("fetch", (e) => {
           cached ??
           fetch(request).then((res) => {
             if (res.ok) {
-              const clone = res.clone();
-              caches.open(CACHE).then((c) => c.put(request, clone));
+              caches.open(CACHE).then((c) => c.put(request, res.clone()));
             }
             return res;
           })
@@ -49,13 +53,32 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
-  // Everything else — network first, cache on success for offline fallback
+  // Navigation requests — network first, fall back to offline page
+  if (request.mode === "navigate") {
+    e.respondWith(
+      fetch(request)
+        .then((res) => {
+          // Cache successful navigation responses for future offline use
+          if (res.ok) {
+            caches.open(CACHE).then((c) => c.put(request, res.clone()));
+          }
+          return res;
+        })
+        .catch(() =>
+          caches.match(request).then(
+            (cached) => cached ?? caches.match(OFFLINE_URL)
+          )
+        )
+    );
+    return;
+  }
+
+  // Other assets — network first, cache on success
   e.respondWith(
     fetch(request)
       .then((res) => {
-        if (res.ok && request.mode === "navigate") {
-          const clone = res.clone();
-          caches.open(CACHE).then((c) => c.put(request, clone));
+        if (res.ok) {
+          caches.open(CACHE).then((c) => c.put(request, res.clone()));
         }
         return res;
       })
