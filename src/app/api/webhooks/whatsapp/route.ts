@@ -14,6 +14,7 @@ import { validateTwilioSignature, sendWhatsAppMessage } from "@/lib/whatsapp";
 import { runAgentTurn } from "@/lib/ai-agent";
 
 export const runtime = "nodejs";
+export const maxDuration = 60; // seconds — Vercel Pro allows up to 300
 
 // Supabase service client — no user session needed for webhook
 function getDb() {

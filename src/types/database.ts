@@ -56,6 +56,7 @@ export interface Appointment {
   scheduled_at: string;
   status: AppointmentStatus;
   notes: string | null;
+  cancel_reason: string | null;
   created_at: string;
   updated_at: string;
 }

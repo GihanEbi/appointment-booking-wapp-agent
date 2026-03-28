@@ -1,17 +1,16 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// Routes that don't require authentication
-const PUBLIC_PATHS = ["/login"];
+// Routes that bypass middleware entirely (API handlers do their own auth)
+const BYPASS_PREFIXES = ["/api/", "/_next", "/favicon.ico"];
 
-// Routes that should never be intercepted (webhooks, static assets)
-const BYPASS_PREFIXES = ["/api/webhooks", "/_next", "/favicon.ico"];
+// Pages that are publicly accessible (unauthenticated)
+const PUBLIC_PAGES = ["/login", "/staff/login"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Let webhooks and Next.js internals pass through without auth check
-  if (BYPASS_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+  if (BYPASS_PREFIXES.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
   }
 
@@ -22,13 +21,9 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
+        getAll() { return request.cookies.getAll(); },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           supabaseResponse = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
@@ -38,22 +33,36 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refresh session — do not remove this, it keeps the JWT alive
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
+  const role = (user?.app_metadata?.role as string) ?? "admin";
+  const isStaff = role === "staff";
+  const isStaffRoute = pathname.startsWith("/staff");
+  const isPublic = PUBLIC_PAGES.includes(pathname);
 
-  const isPublicPath = PUBLIC_PATHS.includes(pathname);
-
-  // Not logged in and trying to access a protected route → redirect to login
-  if (!user && !isPublicPath) {
+  // Not logged in
+  if (!user) {
+    if (isPublic) return supabaseResponse;
     const url = request.nextUrl.clone();
-    url.pathname = "/login";
+    url.pathname = isStaffRoute ? "/staff/login" : "/login";
     return NextResponse.redirect(url);
   }
 
-  // Already logged in and trying to access login → redirect to dashboard
-  if (user && isPublicPath) {
+  // Logged in, on a login page → redirect to appropriate dashboard
+  if (isPublic) {
+    const url = request.nextUrl.clone();
+    url.pathname = isStaff ? "/staff/dashboard" : "/";
+    return NextResponse.redirect(url);
+  }
+
+  // Staff user trying to access admin routes → send to staff dashboard
+  if (isStaff && !isStaffRoute) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/staff/dashboard";
+    return NextResponse.redirect(url);
+  }
+
+  // Admin user trying to access staff portal → send to admin dashboard
+  if (!isStaff && isStaffRoute) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     return NextResponse.redirect(url);
@@ -64,13 +73,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization)
-     * - favicon.ico
-     * - public folder files
-     */
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

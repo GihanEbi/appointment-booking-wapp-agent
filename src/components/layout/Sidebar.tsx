@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   UserCircle2,
+  Users,
 } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
@@ -27,6 +28,7 @@ const navItems = [
   { href: "/notifications", icon: Bell, label: "Notifications" },
   { href: "/announcements", icon: Megaphone, label: "Announcements" },
   { href: "/offers", icon: Gift, label: "Send Offers" },
+  { href: "/sub-users", icon: Users, label: "Sub Users" },
 ];
 
 const bottomItems = [

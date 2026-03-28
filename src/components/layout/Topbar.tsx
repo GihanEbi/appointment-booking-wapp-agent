@@ -59,8 +59,9 @@ export function Topbar() {
     { refreshInterval: 30000 }
   );
 
-  const latest5   = (notifications ?? []).slice(0, 5);
-  const unreadCount = (notifications ?? []).filter((n) => !n.read_at).length;
+  const unread     = (notifications ?? []).filter((n) => !n.read_at);
+  const latest5    = unread.slice(0, 5);
+  const unreadCount = unread.length;
 
   // Close dropdown on outside click
   useEffect(() => {

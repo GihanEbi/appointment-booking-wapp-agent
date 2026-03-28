@@ -50,7 +50,7 @@ export async function POST(request: Request) {
       service,
       scheduled_at,
       notes,
-      status: "confirmed",
+      status: "pending",
     })
     .select()
     .single();

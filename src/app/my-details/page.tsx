@@ -3,10 +3,11 @@
 import { AppShell } from "@/components/layout/AppShell";
 import {
   UserCircle2, FileText, Upload, Trash2, Clock,
-  CheckCircle, ChevronLeft, ChevronRight, Bot,
-  Plus, Pencil, Save, X, AlertCircle,
+  CheckCircle, Bot,
+  Plus, Pencil, X, AlertCircle, LayoutGrid, Table2, Save,
+  AlertTriangle,
 } from "lucide-react";
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import useSWR from "swr";
 import clsx from "clsx";
 import type { BusinessDetails, AvailabilitySlot, TrainingDoc } from "@/types/database";
@@ -14,20 +15,27 @@ import type { BusinessDetails, AvailabilitySlot, TrainingDoc } from "@/types/dat
 /* ── Types ─────────────────────────────────────────────────── */
 type DayName = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
 
-const DAYS: { short: DayName; full: string; date: number }[] = [
-  { short: "Mon", full: "Monday",    date: 21 },
-  { short: "Tue", full: "Tuesday",   date: 22 },
-  { short: "Wed", full: "Wednesday", date: 23 },
-  { short: "Thu", full: "Thursday",  date: 24 },
-  { short: "Fri", full: "Friday",    date: 25 },
-  { short: "Sat", full: "Saturday",  date: 26 },
-  { short: "Sun", full: "Sunday",    date: 27 },
+type SlotModalState =
+  | { mode: "add" }
+  | { mode: "edit"; slot: AvailabilitySlot };
+
+const DAYS: { short: DayName; full: string }[] = [
+  { short: "Mon", full: "Monday" },
+  { short: "Tue", full: "Tuesday" },
+  { short: "Wed", full: "Wednesday" },
+  { short: "Thu", full: "Thursday" },
+  { short: "Fri", full: "Friday" },
+  { short: "Sat", full: "Saturday" },
+  { short: "Sun", full: "Sunday" },
 ];
 
 const DAY_SHORT: Record<string, DayName> = {
   Monday: "Mon", Tuesday: "Tue", Wednesday: "Wed",
   Thursday: "Thu", Friday: "Fri", Saturday: "Sat", Sunday: "Sun",
 };
+
+const JS_DAY_IDX: DayName[] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const todayDay: DayName = JS_DAY_IDX[new Date().getDay()];
 
 const slotColors: Record<number, { bg: string; text: string; border: string }> = {
   0: { bg: "var(--primary-container)",   text: "var(--on-primary-container)",   border: "var(--primary)"   },
@@ -45,6 +53,275 @@ function formatFileSize(bytes: number) {
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function timeToMinutes(time: string) {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}
+
+/* ── Timetable View ─────────────────────────────────────────── */
+const TT_START = 7;
+const TT_END = 22;
+const HOUR_H = 44;
+
+function TimetableView({ slots }: { slots: AvailabilitySlot[] }) {
+  const hours = Array.from({ length: TT_END - TT_START }, (_, i) => TT_START + i);
+  const totalH = (TT_END - TT_START) * HOUR_H;
+
+  return (
+    <div className="overflow-x-auto -mx-1 px-1">
+      <div style={{ minWidth: 460 }}>
+        <div className="flex pl-10 pb-1">
+          {DAYS.map(({ short }) => (
+            <div key={short} className="flex-1 flex flex-col items-center gap-0.5 py-1">
+              <span
+                className="text-[10px] font-bold uppercase tracking-wide"
+                style={{ color: short === todayDay ? "#22c55e" : "var(--on-surface-variant)" }}
+              >
+                {short}
+              </span>
+              {short === todayDay && (
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#22c55e" }} />
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="flex" style={{ height: totalH }}>
+          <div className="relative flex-shrink-0" style={{ width: 40, height: totalH }}>
+            {hours.map((h) => (
+              <div
+                key={h}
+                className="absolute text-[9px] text-right pr-1.5 leading-none select-none"
+                style={{ top: (h - TT_START) * HOUR_H - 5, left: 0, right: 0, color: "var(--outline)" }}
+              >
+                {h.toString().padStart(2, "0")}:00
+              </div>
+            ))}
+          </div>
+
+          {DAYS.map(({ short, full }) => {
+            const daySlots = slots.filter((s) => s.day_of_week === full);
+            return (
+              <div
+                key={short}
+                className="flex-1 relative"
+                style={{ borderLeft: "1px solid var(--outline-variant)", height: totalH }}
+              >
+                {hours.map((h) => (
+                  <div
+                    key={h}
+                    className="absolute left-0 right-0"
+                    style={{ top: (h - TT_START) * HOUR_H, borderTop: "1px solid var(--outline-variant)" }}
+                  />
+                ))}
+                {short === todayDay && (
+                  <div
+                    className="absolute inset-0 pointer-events-none"
+                    style={{ background: "rgba(34,197,94,0.04)" }}
+                  />
+                )}
+                {daySlots.map((slot, i) => {
+                  const startMin = timeToMinutes(slot.start_time);
+                  const endMin = timeToMinutes(slot.end_time);
+                  const topPx = ((startMin - TT_START * 60) / 60) * HOUR_H;
+                  const heightPx = Math.max(((endMin - startMin) / 60) * HOUR_H, 18);
+                  const colors = slotColors[i % 3];
+                  return (
+                    <div
+                      key={slot.id}
+                      className="absolute left-0.5 right-0.5 rounded overflow-hidden"
+                      style={{ top: topPx, height: heightPx, background: colors.bg, borderLeft: `2px solid ${colors.border}` }}
+                    >
+                      <div className="px-1 py-0.5">
+                        <p className="text-[8px] font-bold truncate leading-tight" style={{ color: colors.text }}>
+                          {slot.label}
+                        </p>
+                        {heightPx > 26 && (
+                          <p className="text-[7px] leading-tight" style={{ color: colors.border }}>
+                            {slot.start_time}–{slot.end_time}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── TimePicker ─────────────────────────────────────────────── */
+const PICKER_HOURS = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, "0"));
+const PICKER_MINS  = ["00", "05", "10", "15", "20", "25", "30", "35", "40", "45", "50", "55"];
+
+function TimePicker({
+  value,
+  onChange,
+  placeholder = "Select time",
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef   = useRef<HTMLDivElement>(null);
+  const hourRef   = useRef<HTMLDivElement>(null);
+  const minRef    = useRef<HTMLDivElement>(null);
+
+  const [selH, selM] = value ? value.split(":") : ["", ""];
+
+  /* close on outside click */
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  /* scroll selected item into view when opening */
+  useEffect(() => {
+    if (!open) return;
+    if (selH) {
+      hourRef.current?.querySelector(`[data-h="${selH}"]`)?.scrollIntoView({ block: "center" });
+    }
+    if (selM) {
+      minRef.current?.querySelector(`[data-m="${selM}"]`)?.scrollIntoView({ block: "center" });
+    }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function pickHour(h: string) { onChange(`${h}:${selM || "00"}`); }
+  function pickMin(m: string)  { onChange(`${selH || "00"}:${m}`); setOpen(false); }
+
+  /* 12-hour display */
+  const display = (() => {
+    if (!selH || !selM) return null;
+    const h = parseInt(selH, 10);
+    return {
+      label: `${h === 0 ? 12 : h > 12 ? h - 12 : h}:${selM}`,
+      ampm: h < 12 ? "AM" : "PM",
+    };
+  })();
+
+  return (
+    <div ref={wrapRef} className="relative">
+      {/* Trigger button */}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl transition-all"
+        style={{
+          background: "var(--surface-container-low)",
+          border: `2px solid ${open ? "var(--primary)" : "transparent"}`,
+        }}
+      >
+        {display ? (
+          <span className="flex items-baseline gap-1.5">
+            <span className="text-sm font-bold" style={{ color: "var(--on-surface)" }}>{display.label}</span>
+            <span className="text-[11px] font-semibold" style={{ color: "var(--primary)" }}>{display.ampm}</span>
+          </span>
+        ) : (
+          <span className="text-sm" style={{ color: "var(--outline)" }}>{placeholder}</span>
+        )}
+        <Clock
+          className="w-4 h-4 flex-shrink-0 transition-colors"
+          style={{ color: open ? "var(--primary)" : "var(--on-surface-variant)" }}
+        />
+      </button>
+
+      {/* Dropdown panel */}
+      {open && (
+        <div
+          className="absolute left-0 right-0 mt-1.5 rounded-2xl overflow-hidden z-[60]"
+          style={{
+            background: "var(--surface-container-lowest)",
+            boxShadow: "0px 16px 40px rgba(20,29,36,0.18)",
+            border: "1px solid var(--outline-variant)",
+          }}
+        >
+          {/* Column headers */}
+          <div className="grid grid-cols-2" style={{ borderBottom: "1px solid var(--outline-variant)" }}>
+            <p className="text-[9px] font-bold uppercase tracking-widest text-center py-2.5"
+              style={{ color: "var(--outline)", borderRight: "1px solid var(--outline-variant)" }}>
+              Hour
+            </p>
+            <p className="text-[9px] font-bold uppercase tracking-widest text-center py-2.5"
+              style={{ color: "var(--outline)" }}>
+              Minute
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2">
+            {/* Hours */}
+            <div
+              ref={hourRef}
+              className="overflow-y-auto py-1"
+              style={{ maxHeight: 192, borderRight: "1px solid var(--outline-variant)" }}
+            >
+              {PICKER_HOURS.map((h) => {
+                const hr  = parseInt(h, 10);
+                const lbl = hr === 0 ? "12" : hr > 12 ? (hr - 12).toString() : hr.toString();
+                const ap  = hr < 12 ? "am" : "pm";
+                const sel = selH === h;
+                return (
+                  <button
+                    key={h}
+                    data-h={h}
+                    type="button"
+                    onClick={() => pickHour(h)}
+                    className="w-full flex items-center justify-between px-3.5 py-2 text-sm transition-all"
+                    style={{
+                      background:  sel ? "var(--primary-container)"    : "transparent",
+                      color:       sel ? "var(--on-primary-container)" : "var(--on-surface)",
+                      fontWeight:  sel ? 700 : 400,
+                    }}
+                  >
+                    <span>{lbl}</span>
+                    <span
+                      className="text-[9px] font-bold uppercase"
+                      style={{ color: sel ? "var(--primary)" : "var(--outline)" }}
+                    >
+                      {ap}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Minutes */}
+            <div ref={minRef} className="overflow-y-auto py-1" style={{ maxHeight: 192 }}>
+              {PICKER_MINS.map((m) => {
+                const sel = selM === m;
+                return (
+                  <button
+                    key={m}
+                    data-m={m}
+                    type="button"
+                    onClick={() => pickMin(m)}
+                    className="w-full text-center px-3.5 py-2 text-sm transition-all"
+                    style={{
+                      background: sel ? "var(--primary-container)"    : "transparent",
+                      color:      sel ? "var(--on-primary-container)" : "var(--on-surface)",
+                      fontWeight: sel ? 700 : 400,
+                    }}
+                  >
+                    :{m}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /* ── Component ─────────────────────────────────────────────── */
@@ -82,20 +359,16 @@ export default function MyDetailsPage() {
     if (!file) return;
     setUploading(true);
     setUploadError(null);
-
     const form = new FormData();
     form.append("file", file);
-
     const res = await fetch("/api/training-docs", { method: "POST", body: form });
     const json = await res.json();
-
     if (!res.ok) {
       setUploadError(json.error ?? "Upload failed");
     } else {
       await mutateDocs();
     }
     setUploading(false);
-    // Reset input so the same file can be re-uploaded after delete
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -104,38 +377,82 @@ export default function MyDetailsPage() {
     mutateDocs((prev = []) => prev.filter((d) => d.id !== id), false);
   }
 
-  /* ── Slots ── */
-  const [selectedDay, setSelectedDay] = useState<DayName>("Fri");
+  /* ── Schedule view ── */
+  const [selectedDay, setSelectedDay] = useState<DayName>(todayDay);
+  const [scheduleView, setScheduleView] = useState<"list" | "timetable">("list");
 
   const activeDays = useMemo<DayName[]>(
     () => [...new Set(slots.map((s) => DAY_SHORT[s.day_of_week]).filter(Boolean))] as DayName[],
     [slots]
   );
 
-  async function handleDeleteSlot(id: string) {
-    await fetch(`/api/slots/${id}`, { method: "DELETE" });
-    mutateSlots((prev = []) => prev.filter((s) => s.id !== id), false);
+  const daySlots = useMemo(
+    () => slots.filter((s) => DAY_SHORT[s.day_of_week] === selectedDay),
+    [slots, selectedDay]
+  );
+
+  /* ── Slot modal (add & edit) ── */
+  const [slotModal, setSlotModal] = useState<SlotModalState | null>(null);
+  const [slotForm, setSlotForm] = useState({ label: "", day_of_week: "Monday", start_time: "", end_time: "" });
+  const [submittingSlot, setSubmittingSlot] = useState(false);
+
+  function openAddSlot() {
+    setSlotForm({ label: "", day_of_week: DAYS.find(d => d.short === selectedDay)?.full ?? "Monday", start_time: "", end_time: "" });
+    setSlotModal({ mode: "add" });
   }
 
-  /* ── Add Slot modal ── */
-  const [showAddSlot, setShowAddSlot] = useState(false);
-  const [newSlot, setNewSlot] = useState({ label: "", day_of_week: "Monday", start_time: "", end_time: "" });
-  const [addingSlot, setAddingSlot] = useState(false);
+  function openEditSlot(slot: AvailabilitySlot) {
+    setSlotForm({ label: slot.label, day_of_week: slot.day_of_week, start_time: slot.start_time, end_time: slot.end_time });
+    setSlotModal({ mode: "edit", slot });
+  }
 
-  async function handleAddSlot(e: React.FormEvent) {
+  function closeSlotModal() {
+    setSlotModal(null);
+  }
+
+  async function handleSlotSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setAddingSlot(true);
-    const res = await fetch("/api/slots", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newSlot),
-    });
-    if (res.ok) {
+    if (!slotModal) return;
+    setSubmittingSlot(true);
+
+    if (slotModal.mode === "add") {
+      const res = await fetch("/api/slots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(slotForm),
+      });
+      if (res.ok) {
+        await mutateSlots();
+        closeSlotModal();
+      }
+    } else {
+      await fetch(`/api/slots/${slotModal.slot.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          label: slotForm.label,
+          start_time: slotForm.start_time,
+          end_time: slotForm.end_time,
+        }),
+      });
       await mutateSlots();
-      setShowAddSlot(false);
-      setNewSlot({ label: "", day_of_week: "Monday", start_time: "", end_time: "" });
+      closeSlotModal();
     }
-    setAddingSlot(false);
+
+    setSubmittingSlot(false);
+  }
+
+  /* ── Delete confirmation ── */
+  const [deleteConfirm, setDeleteConfirm] = useState<AvailabilitySlot | null>(null);
+  const [deletingSlot, setDeletingSlot] = useState(false);
+
+  async function confirmDeleteSlot() {
+    if (!deleteConfirm) return;
+    setDeletingSlot(true);
+    await fetch(`/api/slots/${deleteConfirm.id}`, { method: "DELETE" });
+    mutateSlots((prev = []) => prev.filter((s) => s.id !== deleteConfirm.id), false);
+    setDeletingSlot(false);
+    setDeleteConfirm(null);
   }
 
   return (
@@ -256,8 +573,6 @@ export default function MyDetailsPage() {
                     className="hidden" onChange={handleFileChange} />
                 </label>
               </div>
-
-              {/* Drop zone */}
               <div className="px-5 pt-4">
                 {uploadError && (
                   <div className="flex items-center gap-2 p-3 rounded-xl mb-3 text-xs"
@@ -281,8 +596,6 @@ export default function MyDetailsPage() {
                   </p>
                 </div>
               </div>
-
-              {/* Docs list */}
               <div className="px-5 pt-4 pb-5">
                 <p className="text-xs font-semibold uppercase tracking-wider mb-3"
                   style={{ color: "var(--on-surface-variant)" }}>Active Documents</p>
@@ -349,54 +662,97 @@ export default function MyDetailsPage() {
               <div className="flex items-center justify-between px-5 py-4"
                 style={{ borderBottom: "1px solid var(--outline-variant)" }}>
                 <p className="font-bold text-sm" style={{ color: "var(--on-surface)" }}>Weekly Schedule</p>
-                <div className="flex items-center gap-2">
-                  <button className="w-7 h-7 flex items-center justify-center rounded-lg transition-all hover:scale-105"
-                    style={{ background: "var(--surface-container-high)", color: "var(--on-surface-variant)" }}>
-                    <ChevronLeft className="w-4 h-4" />
+                <div className="flex items-center gap-1 p-1 rounded-xl"
+                  style={{ background: "var(--surface-container-low)" }}>
+                  <button
+                    onClick={() => setScheduleView("list")}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                    style={{
+                      background: scheduleView === "list" ? "var(--surface-container-highest)" : "transparent",
+                      color: scheduleView === "list" ? "var(--on-surface)" : "var(--on-surface-variant)",
+                    }}>
+                    <LayoutGrid className="w-3.5 h-3.5" /> Week
                   </button>
-                  <span className="text-xs font-semibold" style={{ color: "var(--on-surface-variant)" }}>Mar 2026</span>
-                  <button className="w-7 h-7 flex items-center justify-center rounded-lg transition-all hover:scale-105"
-                    style={{ background: "var(--surface-container-high)", color: "var(--on-surface-variant)" }}>
-                    <ChevronRight className="w-4 h-4" />
+                  <button
+                    onClick={() => setScheduleView("timetable")}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                    style={{
+                      background: scheduleView === "timetable" ? "var(--surface-container-highest)" : "transparent",
+                      color: scheduleView === "timetable" ? "var(--on-surface)" : "var(--on-surface-variant)",
+                    }}>
+                    <Table2 className="w-3.5 h-3.5" /> Timetable
                   </button>
                 </div>
               </div>
+
               <div className="p-5">
-                <div className="grid grid-cols-7 gap-1.5 mb-5">
-                  {DAYS.map(({ short, date }) => {
-                    const isActive = activeDays.includes(short);
-                    const isSelected = selectedDay === short;
-                    return (
-                      <button key={short} onClick={() => setSelectedDay(short)}
-                        className={clsx("flex flex-col items-center gap-1 py-2.5 rounded-2xl transition-all",
-                          isSelected ? "scale-105" : "hover:scale-105")}
-                        style={{
-                          background: isSelected
-                            ? "linear-gradient(135deg, var(--primary), var(--primary-container))"
-                            : isActive ? "var(--surface-container-low)" : "var(--surface-container)",
-                          color: isSelected ? "var(--on-primary)"
-                            : isActive ? "var(--on-surface)" : "var(--on-surface-variant)",
-                        }}>
-                        <span className="text-[10px] font-semibold uppercase tracking-wide opacity-80">{short}</span>
-                        <span className="text-sm font-bold">{date}</span>
-                        {isActive && !isSelected && (
-                          <div className="w-1 h-1 rounded-full" style={{ background: "var(--primary)" }} />
-                        )}
-                        {isSelected && <div className="w-1 h-1 rounded-full bg-white opacity-80" />}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="flex items-center gap-4 text-xs" style={{ color: "var(--on-surface-variant)" }}>
-                  <span className="flex items-center gap-1.5">
-                    <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: "var(--primary)" }} />
-                    Available
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: "var(--surface-container)" }} />
-                    Closed
-                  </span>
-                </div>
+                {scheduleView === "list" ? (
+                  <>
+                    <div className="grid grid-cols-7 gap-1.5 mb-5">
+                      {DAYS.map(({ short }) => {
+                        const isToday = short === todayDay;
+                        const isActive = activeDays.includes(short);
+                        const isSelected = selectedDay === short;
+                        return (
+                          <button
+                            key={short}
+                            onClick={() => setSelectedDay(short)}
+                            className={clsx(
+                              "flex flex-col items-center gap-1 py-3 rounded-2xl transition-all",
+                              isSelected ? "scale-105" : "hover:scale-105"
+                            )}
+                            style={{
+                              background: isSelected
+                                ? isToday
+                                  ? "linear-gradient(135deg, #16a34a, #22c55e)"
+                                  : "linear-gradient(135deg, var(--primary), var(--primary-container))"
+                                : isToday
+                                  ? "rgba(34,197,94,0.12)"
+                                  : isActive
+                                    ? "rgba(234,179,8,0.12)"   /* amber tint for available */
+                                    : "var(--surface-container)",
+                              color: isSelected
+                                ? "#fff"
+                                : isToday
+                                  ? "#16a34a"
+                                  : isActive
+                                    ? "#a16207"                /* amber text */
+                                    : "var(--on-surface-variant)",
+                              border: isToday && !isSelected
+                                ? "1.5px solid #22c55e"
+                                : isActive && !isSelected
+                                  ? "1.5px solid #eab308"      /* amber border */
+                                  : "1.5px solid transparent",
+                            }}>
+                            <span className="text-[10px] font-bold uppercase tracking-wide">{short}</span>
+                            {isActive && !isSelected && (
+                              <div className="w-1.5 h-1.5 rounded-full"
+                                style={{ background: isToday ? "#22c55e" : "#eab308" }} />
+                            )}
+                            {isSelected && <div className="w-1 h-1 rounded-full bg-white opacity-80" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="flex items-center flex-wrap gap-x-4 gap-y-2 text-xs"
+                      style={{ color: "var(--on-surface-variant)" }}>
+                      <span className="flex items-center gap-1.5">
+                        <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: "#eab308" }} />
+                        Available
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: "#22c55e" }} />
+                        Today
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: "var(--surface-container)" }} />
+                        Closed
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <TimetableView slots={slots} />
+                )}
               </div>
             </div>
 
@@ -406,58 +762,76 @@ export default function MyDetailsPage() {
               <div className="flex items-center justify-between px-5 py-4"
                 style={{ borderBottom: "1px solid var(--outline-variant)" }}>
                 <div>
-                  <p className="font-bold text-sm" style={{ color: "var(--on-surface)" }}>Active Time Slots</p>
+                  <p className="font-bold text-sm flex items-center gap-2" style={{ color: "var(--on-surface)" }}>
+                    Active Time Slots
+                    <span className="text-xs font-normal px-2 py-0.5 rounded-lg"
+                      style={{ background: "var(--surface-container-low)", color: "var(--on-surface-variant)" }}>
+                      {DAYS.find((d) => d.short === selectedDay)?.full}
+                    </span>
+                  </p>
                   <p className="text-xs mt-0.5" style={{ color: "var(--on-surface-variant)" }}>
                     Booking windows your AI agent can confirm
                   </p>
                 </div>
-                <button onClick={() => setShowAddSlot(true)}
+                <button onClick={openAddSlot}
                   className="btn-primary flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl">
                   <Plus className="w-3.5 h-3.5" /> Add Slot
                 </button>
               </div>
               <div className="p-5 space-y-3">
-                {slots.length === 0 ? (
+                {daySlots.length === 0 ? (
                   <div className="flex flex-col items-center gap-2 py-8 text-center">
                     <Clock className="w-8 h-8" style={{ color: "var(--outline)" }} />
                     <p className="text-sm font-medium" style={{ color: "var(--on-surface-variant)" }}>
-                      No time slots configured
+                      No slots for {DAYS.find((d) => d.short === selectedDay)?.full}
                     </p>
                     <p className="text-xs" style={{ color: "var(--outline)" }}>
-                      Add slots to let your AI confirm bookings
+                      Add slots to let your AI confirm bookings on this day
                     </p>
                   </div>
-                ) : slots.map((slot, i) => {
-                  const colors = slotColors[i % 3];
-                  return (
-                    <div key={slot.id}
-                      className="group relative flex items-start gap-3 p-4 rounded-xl transition-all hover:scale-[1.005]"
-                      style={{ background: colors.bg, borderLeft: `3px solid ${colors.border}` }}>
-                      <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
-                        style={{ background: "rgba(255,255,255,0.25)" }}>
-                        <Clock className="w-4 h-4" style={{ color: colors.border }} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: colors.border }}>
-                          {slot.day_of_week}
-                        </span>
-                        <p className="text-sm font-bold" style={{ color: colors.text }}>{slot.label}</p>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <CheckCircle className="w-3.5 h-3.5" style={{ color: colors.border }} />
-                          <span className="text-xs font-medium" style={{ color: colors.text }}>
-                            {slot.start_time} – {slot.end_time}
+                ) : (
+                  daySlots.map((slot, i) => {
+                    const colors = slotColors[i % 3];
+                    return (
+                      <div key={slot.id}
+                        className="group flex items-start gap-3 p-4 rounded-xl transition-all hover:scale-[1.005]"
+                        style={{ background: colors.bg, borderLeft: `3px solid ${colors.border}` }}>
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                          style={{ background: "rgba(255,255,255,0.25)" }}>
+                          <Clock className="w-4 h-4" style={{ color: colors.border }} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: colors.border }}>
+                            {slot.day_of_week}
                           </span>
+                          <p className="text-sm font-bold" style={{ color: colors.text }}>{slot.label}</p>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <CheckCircle className="w-3.5 h-3.5" style={{ color: colors.border }} />
+                            <span className="text-xs font-medium" style={{ color: colors.text }}>
+                              {slot.start_time} – {slot.end_time}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => openEditSlot(slot)}
+                            className="w-7 h-7 flex items-center justify-center rounded-lg transition-all hover:scale-110"
+                            style={{ background: "rgba(255,255,255,0.3)", color: colors.border }}
+                            aria-label="Edit slot">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setDeleteConfirm(slot)}
+                            className="w-7 h-7 flex items-center justify-center rounded-lg transition-all hover:scale-110"
+                            style={{ background: "rgba(255,255,255,0.3)", color: colors.border }}
+                            aria-label="Delete slot">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
-                      <button onClick={() => handleDeleteSlot(slot.id)}
-                        className="opacity-0 group-hover:opacity-100 w-7 h-7 flex items-center justify-center rounded-lg transition-all hover:scale-110 shrink-0"
-                        style={{ background: "rgba(255,255,255,0.4)", color: colors.border }}
-                        aria-label="Remove slot">
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
             </div>
 
@@ -485,87 +859,199 @@ export default function MyDetailsPage() {
         <div className="h-16 lg:hidden" />
       </div>
 
-      {/* ── Add Slot Modal ── */}
-      {showAddSlot && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      {/* ══ Add / Edit Slot Modal ══ */}
+      {slotModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)" }}
-          onClick={(e) => e.target === e.currentTarget && setShowAddSlot(false)}>
-          <div className="w-full max-w-sm rounded-2xl overflow-hidden"
+          onClick={(e) => e.target === e.currentTarget && closeSlotModal()}
+        >
+          <div className="w-full max-w-sm rounded-2xl"
             style={{ background: "var(--surface-container-lowest)", boxShadow: "0px 24px 48px rgba(20,29,36,0.2)" }}>
-            <div className="flex items-center justify-between px-5 py-4"
+            <div className="flex items-center justify-between px-5 py-4 rounded-t-2xl"
               style={{ borderBottom: "1px solid var(--outline-variant)" }}>
-              <p className="font-bold text-sm" style={{ color: "var(--on-surface)" }}>Add Time Slot</p>
-              <button onClick={() => setShowAddSlot(false)}
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+                  style={{
+                    background: slotModal.mode === "edit"
+                      ? "var(--secondary-container)"
+                      : "var(--primary-container)",
+                    color: slotModal.mode === "edit"
+                      ? "var(--secondary)"
+                      : "var(--primary)",
+                  }}>
+                  {slotModal.mode === "edit" ? <Pencil className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                </div>
+                <p className="font-bold text-sm" style={{ color: "var(--on-surface)" }}>
+                  {slotModal.mode === "edit" ? "Edit Time Slot" : "Add Time Slot"}
+                </p>
+              </div>
+              <button onClick={closeSlotModal}
                 className="w-7 h-7 flex items-center justify-center rounded-lg"
                 style={{ background: "var(--surface-container-high)", color: "var(--on-surface-variant)" }}>
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
 
-            <form onSubmit={handleAddSlot} className="p-5 space-y-4">
+            <form onSubmit={handleSlotSubmit} className="p-5 space-y-4 rounded-b-2xl">
               {/* Label */}
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold" style={{ color: "var(--on-surface-variant)" }}>
                   Slot Label
                 </label>
-                <input required value={newSlot.label}
-                  onChange={(e) => setNewSlot((p) => ({ ...p, label: e.target.value }))}
+                <input
+                  required
+                  value={slotForm.label}
+                  onChange={(e) => setSlotForm((p) => ({ ...p, label: e.target.value }))}
                   placeholder="e.g. Morning Session"
                   className="w-full px-4 py-2.5 text-sm rounded-xl outline-none"
                   style={{ background: "var(--surface-container-low)", color: "var(--on-surface)", border: "2px solid transparent" }}
                   onFocus={(e) => (e.currentTarget.style.borderColor = "var(--primary)")}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = "transparent")} />
+                  onBlur={(e) => (e.currentTarget.style.borderColor = "transparent")}
+                />
               </div>
 
-              {/* Day of week */}
+              {/* Day of week — disabled in edit mode */}
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold" style={{ color: "var(--on-surface-variant)" }}>
                   Day of Week
                 </label>
-                <select required value={newSlot.day_of_week}
-                  onChange={(e) => setNewSlot((p) => ({ ...p, day_of_week: e.target.value }))}
-                  className="w-full px-4 py-2.5 text-sm rounded-xl outline-none appearance-none"
+                <select
+                  required
+                  disabled={slotModal.mode === "edit"}
+                  value={slotForm.day_of_week}
+                  onChange={(e) => setSlotForm((p) => ({ ...p, day_of_week: e.target.value }))}
+                  className="w-full px-4 py-2.5 text-sm rounded-xl outline-none appearance-none disabled:opacity-60"
                   style={{ background: "var(--surface-container-low)", color: "var(--on-surface)", border: "2px solid transparent" }}
                   onFocus={(e) => (e.currentTarget.style.borderColor = "var(--primary)")}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = "transparent")}>
+                  onBlur={(e) => (e.currentTarget.style.borderColor = "transparent")}
+                >
                   {DAYS.map((d) => (
                     <option key={d.full} value={d.full}>{d.full}</option>
                   ))}
                 </select>
+                {slotModal.mode === "edit" && (
+                  <p className="text-[10px]" style={{ color: "var(--outline)" }}>
+                    To change the day, delete this slot and create a new one.
+                  </p>
+                )}
               </div>
 
               {/* Start / End time */}
               <div className="grid grid-cols-2 gap-3">
-                {(["start_time", "end_time"] as const).map((field) => (
-                  <div key={field} className="space-y-1.5">
-                    <label className="text-xs font-semibold" style={{ color: "var(--on-surface-variant)" }}>
-                      {field === "start_time" ? "Start Time" : "End Time"}
-                    </label>
-                    <input required type="time" value={newSlot[field]}
-                      onChange={(e) => setNewSlot((p) => ({ ...p, [field]: e.target.value }))}
-                      className="w-full px-4 py-2.5 text-sm rounded-xl outline-none"
-                      style={{ background: "var(--surface-container-low)", color: "var(--on-surface)", border: "2px solid transparent" }}
-                      onFocus={(e) => (e.currentTarget.style.borderColor = "var(--primary)")}
-                      onBlur={(e) => (e.currentTarget.style.borderColor = "transparent")} />
-                  </div>
-                ))}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold" style={{ color: "var(--on-surface-variant)" }}>
+                    Start Time
+                  </label>
+                  <TimePicker
+                    value={slotForm.start_time}
+                    onChange={(v) => setSlotForm((p) => ({ ...p, start_time: v }))}
+                    placeholder="Start"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold" style={{ color: "var(--on-surface-variant)" }}>
+                    End Time
+                  </label>
+                  <TimePicker
+                    value={slotForm.end_time}
+                    onChange={(v) => setSlotForm((p) => ({ ...p, end_time: v }))}
+                    placeholder="End"
+                  />
+                </div>
               </div>
 
               <div className="flex gap-3 pt-1">
-                <button type="button" onClick={() => setShowAddSlot(false)}
+                <button type="button" onClick={closeSlotModal}
                   className="flex-1 py-2.5 text-sm font-semibold rounded-xl transition-all"
                   style={{ background: "var(--surface-container-low)", color: "var(--on-surface-variant)" }}>
                   Cancel
                 </button>
-                <button type="submit" disabled={addingSlot}
+                <button
+                  type="submit"
+                  disabled={submittingSlot || !slotForm.start_time || !slotForm.end_time}
                   className="flex-1 btn-primary py-2.5 text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-60">
-                  {addingSlot
+                  {submittingSlot
                     ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    : <Plus className="w-4 h-4" />}
-                  Add Slot
+                    : slotModal.mode === "edit"
+                      ? <Save className="w-4 h-4" />
+                      : <Plus className="w-4 h-4" />}
+                  {slotModal.mode === "edit" ? "Save Changes" : "Add Slot"}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Delete Confirmation Modal ══ */}
+      {deleteConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)" }}
+          onClick={(e) => e.target === e.currentTarget && setDeleteConfirm(null)}
+        >
+          <div className="w-full max-w-sm rounded-2xl overflow-hidden"
+            style={{ background: "var(--surface-container-lowest)", boxShadow: "0px 24px 48px rgba(20,29,36,0.2)" }}>
+            {/* Warning header */}
+            <div className="px-5 pt-6 pb-4 flex flex-col items-center text-center gap-3">
+              <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                style={{ background: "var(--error-container)" }}>
+                <AlertTriangle className="w-7 h-7" style={{ color: "var(--error)" }} />
+              </div>
+              <div>
+                <p className="font-bold text-base" style={{ color: "var(--on-surface)" }}>Delete Time Slot?</p>
+                <p className="text-xs mt-1 leading-relaxed" style={{ color: "var(--on-surface-variant)" }}>
+                  You are about to delete
+                </p>
+              </div>
+            </div>
+
+            {/* Slot preview */}
+            <div className="mx-5 mb-4 p-3 rounded-xl flex items-center gap-3"
+              style={{ background: "var(--surface-container-low)", border: "1px solid var(--outline-variant)" }}>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                style={{ background: "var(--error-container)" }}>
+                <Clock className="w-4 h-4" style={{ color: "var(--error)" }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold truncate" style={{ color: "var(--on-surface)" }}>
+                  {deleteConfirm.label}
+                </p>
+                <p className="text-xs" style={{ color: "var(--on-surface-variant)" }}>
+                  {deleteConfirm.day_of_week} · {deleteConfirm.start_time} – {deleteConfirm.end_time}
+                </p>
+              </div>
+            </div>
+
+            {/* Notice */}
+            <div className="mx-5 mb-5 flex items-start gap-2 p-3 rounded-xl text-xs"
+              style={{ background: "rgba(234,179,8,0.1)", border: "1px solid rgba(234,179,8,0.3)" }}>
+              <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "#a16207" }} />
+              <p style={{ color: "#a16207" }}>
+                This will not affect any already booked appointments. Only future booking availability will change.
+              </p>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-3 px-5 pb-5">
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="flex-1 py-2.5 text-sm font-semibold rounded-xl transition-all"
+                style={{ background: "var(--surface-container-low)", color: "var(--on-surface-variant)" }}>
+                Keep Slot
+              </button>
+              <button
+                onClick={confirmDeleteSlot}
+                disabled={deletingSlot}
+                className="flex-1 py-2.5 text-sm font-semibold rounded-xl flex items-center justify-center gap-2 transition-all hover:opacity-90 disabled:opacity-60"
+                style={{ background: "var(--error)", color: "var(--on-error)" }}>
+                {deletingSlot
+                  ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  : <Trash2 className="w-4 h-4" />}
+                Yes, Delete
+              </button>
+            </div>
           </div>
         </div>
       )}

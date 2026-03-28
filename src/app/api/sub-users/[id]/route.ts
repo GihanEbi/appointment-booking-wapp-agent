@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { hashPassword } from "@/lib/staff-password";
 
 export async function PATCH(
   request: Request,
@@ -9,17 +10,22 @@ export async function PATCH(
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
-  const body = await request.json().catch(() => ({}));
-  const { status } = body;
+  const body = await request.json();
+  const { name, email, password, bio, is_active } = body;
 
-  if (!status) return Response.json({ error: "status is required" }, { status: 400 });
+  const update: Record<string, unknown> = {};
+  if (name     !== undefined) update.name      = name;
+  if (email    !== undefined) update.email     = email;
+  if (bio      !== undefined) update.bio       = bio;
+  if (is_active !== undefined) update.is_active = is_active;
+  if (password)               update.password  = hashPassword(password);
 
   const { data, error } = await supabase
-    .from("offers")
-    .update({ status })
+    .from("sub_users")
+    .update(update)
     .eq("id", id)
     .eq("profile_id", user.id)
-    .select()
+    .select("id, name, email, bio, is_active, created_at")
     .single();
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
@@ -37,7 +43,7 @@ export async function DELETE(
   const { id } = await params;
 
   const { error } = await supabase
-    .from("offers")
+    .from("sub_users")
     .delete()
     .eq("id", id)
     .eq("profile_id", user.id);

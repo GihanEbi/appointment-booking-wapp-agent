@@ -36,40 +36,50 @@ export async function POST(
     return Response.json({ error: "Offer not found" }, { status: 404 });
   }
 
-  // Optional: allow caller to pass a custom message override
+  // Optional: allow caller to pass a custom message override and specific phones
   const body = await request.json().catch(() => ({}));
   const customMessage: string | undefined = body.message;
+  const targetPhones: string[] | undefined = body.phones; // if provided, send only to these
 
   // Build the WhatsApp message
   const message = customMessage ?? buildOfferMessage(offer);
 
-  // Fetch all customer phones from chat_sessions (capped at 200 per broadcast)
   const db = getServiceDb();
-  const { data: sessions, error: sessionsErr } = await db
-    .from("chat_sessions")
-    .select("customer_phone, customer_name")
-    .eq("profile_id", user.id)
-    .limit(200);
 
-  if (sessionsErr) {
-    return Response.json({ error: sessionsErr.message }, { status: 500 });
-  }
+  // Resolve recipient list
+  let recipients: { customer_phone: string }[];
 
-  if (!sessions || sessions.length === 0) {
-    return Response.json({
-      sent: 0,
-      failed: 0,
-      message: "No customers found. Customers will appear here once they message you on WhatsApp.",
-    });
+  if (targetPhones && targetPhones.length > 0) {
+    recipients = targetPhones.map((p) => ({ customer_phone: p }));
+  } else {
+    // Fetch all customer phones from chat_sessions (capped at 200 per broadcast)
+    const { data: sessions, error: sessionsErr } = await db
+      .from("chat_sessions")
+      .select("customer_phone, customer_name")
+      .eq("profile_id", user.id)
+      .limit(200);
+
+    if (sessionsErr) {
+      return Response.json({ error: sessionsErr.message }, { status: 500 });
+    }
+
+    if (!sessions || sessions.length === 0) {
+      return Response.json({
+        sent: 0,
+        failed: 0,
+        message: "No customers found. Customers will appear here once they message you on WhatsApp.",
+      });
+    }
+    recipients = sessions;
   }
 
   // Send messages (sequential to stay within Twilio rate limits)
   let sent = 0;
   let failed = 0;
 
-  for (const session of sessions) {
+  for (const r of recipients) {
     try {
-      await sendWhatsAppMessage(session.customer_phone, message);
+      await sendWhatsAppMessage(r.customer_phone, message);
       sent++;
     } catch {
       failed++;

@@ -21,6 +21,12 @@ interface AgentParams {
   incomingMessage: string;
 }
 
+interface StaffMember {
+  id: string;
+  name: string;
+  bio: string;
+}
+
 // ── RAG: embed query → find relevant doc chunks ───────────────────
 async function fetchRelevantDocs(
   profileId: string,
@@ -60,22 +66,41 @@ async function fetchRelevantDocs(
 async function loadContext(profileId: string) {
   const db = getServiceClient();
 
-  const [bizRes, slotsRes, announcementsRes] = await Promise.all([
+  const now = new Date().toISOString();
+
+  const [bizRes, slotsRes, announcementsRes, staffRes] = await Promise.all([
     db.from("business_details").select("*").eq("profile_id", profileId).single(),
     db.from("availability_slots").select("*").eq("profile_id", profileId),
     db
       .from("announcements")
-      .select("title, message")
+      .select("title, message, scheduled_for")
       .eq("profile_id", profileId)
       .eq("status", "scheduled")
+      .gt("scheduled_for", now)
       .order("scheduled_for", { ascending: true })
-      .limit(3),
+      .limit(10),
+    db.auth.admin.listUsers({ perPage: 200 }),
   ]);
+
+  // Filter staff members managed by this admin profile
+  const staffMembers: StaffMember[] = (staffRes.data?.users ?? [])
+    .filter(
+      (u) =>
+        u.app_metadata?.role === "staff" &&
+        u.app_metadata?.managed_by === profileId &&
+        (u.app_metadata?.is_active ?? true)
+    )
+    .map((u) => ({
+      id: u.id,
+      name: (u.user_metadata?.full_name as string) ?? u.email ?? "",
+      bio: (u.user_metadata?.bio as string) ?? "",
+    }));
 
   return {
     business: bizRes.data,
     slots: slotsRes.data ?? [],
     announcements: announcementsRes.data ?? [],
+    staffMembers,
   };
 }
 
@@ -109,7 +134,6 @@ async function saveMessages(
     { session_id: sessionId, role: "ai", content: aiText },
   ]);
 
-  // Update session summary
   await db
     .from("chat_sessions")
     .update({
@@ -136,7 +160,6 @@ function parseSlotTime(timeStr: string): { hour: number; minute: number } {
 function getUTCOffset(timezone: string): string {
   try {
     const now = new Date();
-    // toLocaleString gives local wall-clock time; compare with UTC to get offset
     const local = new Date(now.toLocaleString("en-US", { timeZone: timezone }));
     const utc   = new Date(now.toLocaleString("en-US", { timeZone: "UTC" }));
     const diffMins = Math.round((local.getTime() - utc.getTime()) / 60000);
@@ -180,7 +203,7 @@ function buildSystemPrompt(
   timezone: string,
   utcOffset: string
 ): string {
-  const { business, slots, announcements } = context;
+  const { business, slots, announcements, staffMembers } = context;
 
   const formattedSlots =
     slots.length > 0
@@ -195,7 +218,20 @@ function buildSystemPrompt(
   const formattedAnnouncements =
     announcements.length > 0
       ? announcements
-          .map((a: { title: string; message: string }) => `• ${a.title}: ${a.message}`)
+          .map((a: { title: string; message: string; scheduled_for: string }) => {
+            const expires = new Date(a.scheduled_for).toLocaleDateString("en-US", {
+              timeZone: timezone,
+              weekday: "long", month: "short", day: "numeric",
+            });
+            return `• [Active until ${expires}] ${a.title}: ${a.message}`;
+          })
+          .join("\n")
+      : "";
+
+  const formattedStaff =
+    staffMembers.length > 0
+      ? staffMembers
+          .map((s) => `• ${s.name} (ID: ${s.id})${s.bio ? ` — ${s.bio}` : ""}`)
           .join("\n")
       : "";
 
@@ -227,17 +263,34 @@ IMPORTANT: All appointment times are in this timezone. When generating ISO 8601 
 ${formattedSlots}
 
 ${
-  formattedAnnouncements
-    ? `## Current Announcements\n${formattedAnnouncements}\n`
+  formattedStaff
+    ? `## Our Team
+${formattedStaff}
+
+Use this information to answer questions about staff members and their specialties. If a customer asks about a specific team member, refer to their bio above. When a customer wants to book with a specific staff member, use their ID in the staffMemberId field of bookAppointment.
+`
     : ""
-}
-${
+}${
+  formattedAnnouncements
+    ? `## Active Schedule Announcements (CRITICAL — read before checking availability)\n${formattedAnnouncements}\n\nIMPORTANT: These announcements represent real schedule changes. If an announcement says the business is closed, not working, or unavailable on a specific day or date, you MUST NOT offer any time slots for that day/date — even if slots exist in the availability configuration. Treat these as hard overrides.\n`
+    : ""
+}${
   ragChunks
     ? `## Knowledge Base (use this to answer service/pricing questions)\n${ragChunks}\n`
     : ""
 }
 ## Customer
 You are speaking with: ${customerName || "a customer"} (via WhatsApp)
+
+## Booking Flow (IMPORTANT — follow exactly)
+1. Customer asks to book → call checkExistingBooking first.
+2. If no existing booking → ask for preferred date (and staff member if relevant), then call checkAvailability.
+3. Before showing slots — check Active Schedule Announcements. If any announcement blocks the requested date/day, inform the customer and suggest alternative dates instead.
+4. Customer picks an unblocked slot → call bookAppointment to record it.
+4. After bookAppointment succeeds → tell the customer:
+   "Your appointment request has been recorded! ✅ Our team will review and confirm it shortly. You'll receive a WhatsApp message once it's confirmed or if any changes are needed."
+   NEVER say the appointment is "confirmed" — it is PENDING until the business owner reviews it.
+5. Customer-initiated cancellations → use cancelAppointment after verifying the ID from checkExistingBooking.
 
 ## Instructions
 - Be warm, professional, and concise. Use WhatsApp-friendly formatting (short paragraphs, emojis OK).
@@ -246,7 +299,7 @@ You are speaking with: ${customerName || "a customer"} (via WhatsApp)
 - Each customer may only hold one active appointment at a time.
 - When a customer wants to book: ask for their preferred date (get a specific date, not just a day name), then call checkAvailability with that date in YYYY-MM-DD format.
 - checkAvailability already filters out booked slots — only show what it returns.
-- Use bookAppointment to confirm a booking — do NOT just say "I've booked you in" without calling the tool.
+- Use bookAppointment to record a booking — do NOT just say "I've booked you in" without calling the tool.
 - Use cancelAppointment if a customer asks to cancel — confirm the appointment ID from checkExistingBooking first.
 - If a question is outside your scope, politely say you'll pass it to the team.
 - Keep responses under 300 characters where possible for WhatsApp readability.`;
@@ -256,7 +309,6 @@ You are speaking with: ${customerName || "a customer"} (via WhatsApp)
 export async function runAgentTurn(params: AgentParams): Promise<string> {
   const { profileId, sessionId, customerPhone, customerName, incomingMessage } = params;
 
-  // Bail out early if OpenAI key is missing
   if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY === "your_openai_api_key") {
     return "Hi! Our AI assistant is being configured. Please check back shortly! 😊";
   }
@@ -265,7 +317,6 @@ export async function runAgentTurn(params: AgentParams): Promise<string> {
   const timezone  = process.env.BUSINESS_TIMEZONE ?? "UTC";
   const utcOffset = getUTCOffset(timezone);
 
-  // Load everything in parallel
   const [context, ragChunks, history] = await Promise.all([
     loadContext(profileId),
     fetchRelevantDocs(profileId, incomingMessage),
@@ -309,13 +360,11 @@ export async function runAgentTurn(params: AgentParams): Promise<string> {
       execute: async (input) => {
         const { date } = input;
 
-        // Derive day of week from the date
         const dayOfWeek = new Date(`${date}T12:00:00`).toLocaleDateString(
           "en-US",
           { weekday: "long" }
         );
 
-        // Get configured slots for that day
         const { data: slots } = await db
           .from("availability_slots")
           .select("label, start_time, end_time")
@@ -330,8 +379,6 @@ export async function runAgentTurn(params: AgentParams): Promise<string> {
           return `No availability configured for ${dayOfWeek} (${date}). Available days: ${availableDays || "none configured"}.`;
         }
 
-        // Fetch a ±1 day UTC window to safely cover any timezone offset,
-        // then filter to the exact local date in the business timezone.
         const prevDay = new Date(`${date}T12:00:00Z`);
         prevDay.setUTCDate(prevDay.getUTCDate() - 1);
         const nextDay = new Date(`${date}T12:00:00Z`);
@@ -345,8 +392,6 @@ export async function runAgentTurn(params: AgentParams): Promise<string> {
           .gte("scheduled_at", prevDay.toISOString().slice(0, 10) + "T00:00:00Z")
           .lte("scheduled_at", nextDay.toISOString().slice(0, 10) + "T23:59:59Z");
 
-        // Keep only appointments whose LOCAL date matches the requested date,
-        // then extract their local hour/minute for comparison.
         const bookedTimes = (bookedAppts ?? [])
           .filter(
             (a: { scheduled_at: string }) =>
@@ -356,7 +401,6 @@ export async function runAgentTurn(params: AgentParams): Promise<string> {
             localHourMinute(a.scheduled_at, timezone)
           );
 
-        // Filter out slots that are already taken
         const freeSlots = slots.filter(
           (slot: { start_time: string; end_time: string; label: string }) => {
             const { hour, minute } = parseSlotTime(slot.start_time);
@@ -383,16 +427,26 @@ export async function runAgentTurn(params: AgentParams): Promise<string> {
 
     bookAppointment: tool({
       description:
-        "Book an appointment for the customer. Only call after confirming availability.",
+        "Record an appointment request for the customer with PENDING status. Only call after confirming availability. The business owner will confirm or cancel it — do NOT tell the customer it is confirmed.",
       inputSchema: z.object({
         customerName: z.string().describe("Full name of the customer"),
         service: z.string().describe("Service they want e.g. 'Hair Styling'"),
         scheduledAt: z
           .string()
           .describe("ISO 8601 datetime e.g. '2026-03-28T10:00:00'"),
+        staffMemberId: z
+          .string()
+          .optional()
+          .describe("ID of the staff member to assign this appointment to. Only set if the customer specifically requested a team member by name."),
       }),
       execute: async (input) => {
-        const { customerName: name, service, scheduledAt } = input;
+        const { customerName: name, service, scheduledAt, staffMemberId } = input;
+
+        // Resolve the staff member name for the notification message
+        const assignedStaff = staffMemberId
+          ? context.staffMembers.find((s) => s.id === staffMemberId)
+          : null;
+
         const { data, error } = await db
           .from("appointments")
           .insert({
@@ -401,7 +455,8 @@ export async function runAgentTurn(params: AgentParams): Promise<string> {
             customer_name: name,
             service,
             scheduled_at: scheduledAt,
-            status: "confirmed",
+            status: "pending",
+            assigned_user_id: staffMemberId ?? null,
           })
           .select("id")
           .single();
@@ -417,43 +472,61 @@ export async function runAgentTurn(params: AgentParams): Promise<string> {
           minute: "2-digit",
         });
 
-        // Create a notification for the dashboard
+        const staffNote = assignedStaff ? ` with ${assignedStaff.name}` : "";
+
+        // Notify the admin dashboard
         await db.from("notifications").insert({
           profile_id: profileId,
-          type: "success",
-          title: "New Booking",
-          message: `${name} booked ${service} for ${displayTime}.`,
+          type: "info",
+          title: "New Appointment Request",
+          message: `${name} requested ${service}${staffNote} for ${displayTime}. Awaiting your confirmation.`,
         });
 
-        return `Appointment confirmed! ID: ${data.id}. ${name} is booked for ${service} on ${displayTime}.`;
+        return `PENDING appointment recorded. ID: ${data.id}. ${name} has requested ${service}${staffNote} on ${displayTime}. The business owner must confirm it. Tell the customer their request is recorded and they will receive a WhatsApp message once the team confirms or updates them.`;
       },
     }),
 
     cancelAppointment: tool({
-      description: "Cancel an existing appointment by appointment ID.",
+      description: "Cancel an existing appointment by appointment ID (customer-initiated cancellation).",
       inputSchema: z.object({
         appointmentId: z.string().describe("The UUID of the appointment to cancel"),
+        reason: z.string().optional().describe("Reason the customer is canceling, if provided"),
       }),
       execute: async (input) => {
-        const { appointmentId } = input;
+        const { appointmentId, reason } = input;
+        const updatePayload: Record<string, unknown> = {
+          status: "canceled",
+          cancel_reason: reason ?? "Canceled by customer",
+        };
+
         const { data, error } = await db
           .from("appointments")
-          .update({ status: "canceled" })
+          .update(updatePayload)
           .eq("id", appointmentId)
           .eq("profile_id", profileId)
           .select("customer_name, service, scheduled_at")
           .single();
 
-        if (error || !data) return "Could not find that appointment. Please check the ID.";
+        if (error || !data) {
+          const { data: d2, error: e2 } = await db
+            .from("appointments")
+            .update({ status: "canceled" })
+            .eq("id", appointmentId)
+            .eq("profile_id", profileId)
+            .select("customer_name, service, scheduled_at")
+            .single();
+          if (e2 || !d2) return "Could not find that appointment. Please check the ID.";
+          Object.assign(data ?? {}, d2);
+        }
 
         await db.from("notifications").insert({
           profile_id: profileId,
           type: "warning",
-          title: "Cancellation",
-          message: `${data.customer_name}'s ${data.service} appointment was canceled.`,
+          title: "Appointment Canceled by Customer",
+          message: `${data?.customer_name}'s ${data?.service} appointment was canceled by the customer.`,
         });
 
-        return `Appointment for ${data.customer_name} (${data.service}) has been canceled.`;
+        return `Appointment for ${data?.customer_name} (${data?.service}) has been canceled as requested.`;
       },
     }),
   };
@@ -468,12 +541,11 @@ export async function runAgentTurn(params: AgentParams): Promise<string> {
         { role: "user", content: incomingMessage },
       ],
       tools,
-      stopWhen: stepCountIs(5), // Allow up to 5 tool-call rounds
+      stopWhen: stepCountIs(5),
     });
 
     const replyText = text.trim() || "I'm sorry, I didn't catch that. Could you rephrase?";
 
-    // Persist both messages
     await saveMessages(sessionId, incomingMessage, replyText);
 
     return replyText;

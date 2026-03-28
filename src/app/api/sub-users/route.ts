@@ -1,28 +1,19 @@
 import { createClient } from "@/lib/supabase/server";
+import { hashPassword } from "@/lib/staff-password";
 
 export async function GET() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-  const now = new Date().toISOString();
-
-  // Auto-expire any announcements whose expire date has passed
-  await supabase
-    .from("announcements")
-    .update({ status: "expired" })
-    .eq("profile_id", user.id)
-    .eq("status", "scheduled")
-    .not("scheduled_for", "is", null)
-    .lt("scheduled_for", now);
-
   const { data, error } = await supabase
-    .from("announcements")
-    .select("*")
+    .from("sub_users")
+    .select("id, name, email, bio, is_active, created_at")
     .eq("profile_id", user.id)
     .order("created_at", { ascending: false });
 
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  // Table may not exist yet — return empty array so the UI still renders
+  if (error) return Response.json([]);
   return Response.json(data ?? []);
 }
 
@@ -32,24 +23,23 @@ export async function POST(request: Request) {
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json();
-  const { title, message, expires_at } = body;
+  const { name, email, password, bio } = body;
 
-  if (!title || !message || !expires_at) {
-    return Response.json({ error: "Title, message and expires_at are required" }, { status: 400 });
+  if (!name || !email || !password) {
+    return Response.json({ error: "Name, email and password are required" }, { status: 400 });
   }
 
   const { data, error } = await supabase
-    .from("announcements")
+    .from("sub_users")
     .insert({
       profile_id: user.id,
-      title,
-      message,
-      audience: "All",
-      scheduled_for: expires_at,   // reusing scheduled_for as expires_at
-      status: "scheduled",          // "scheduled" = active
-      reach: 0,
+      name,
+      email: email.toLowerCase().trim(),
+      password: hashPassword(password),
+      bio: bio || "",
+      is_active: true,
     })
-    .select()
+    .select("id, name, email, bio, is_active, created_at")
     .single();
 
   if (error) return Response.json({ error: error.message }, { status: 500 });

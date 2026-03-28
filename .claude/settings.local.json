@@ -11,5 +11,9 @@
       "Bash(node -e \":*)",
       "Bash(node -e \"const ai = require\\(''''ai''''\\); console.log\\(Object.keys\\(ai\\).filter\\(k => k.toLowerCase\\(\\).includes\\(''''step''''\\) || k.toLowerCase\\(\\).includes\\(''''round''''\\)\\)\\)\")"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "supabase"
+  ],
+  "enableAllProjectMcpServers": true
 }
