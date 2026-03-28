@@ -2,7 +2,16 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 // Routes that bypass proxy entirely (API handlers do their own auth)
-const BYPASS_PREFIXES = ["/api/", "/_next", "/favicon.ico"];
+const BYPASS_PREFIXES = [
+  "/api/",
+  "/_next",
+  "/favicon.ico",
+  "/sw.js",
+  "/manifest.webmanifest",
+  "/offline.html",
+  "/icons/",
+  "/apple-touch-icon.png",
+];
 
 // Pages that are publicly accessible (unauthenticated)
 const PUBLIC_PAGES = ["/login", "/staff/login", "/offline"];

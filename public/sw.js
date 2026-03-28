@@ -2,7 +2,6 @@ const CACHE = "concierge-ai-v1";
 const OFFLINE_URL = "/offline.html";
 
 self.addEventListener("install", (e) => {
-  // Pre-cache the offline fallback — this is what Chrome checks for "works offline"
   e.waitUntil(
     caches
       .open(CACHE)
@@ -26,7 +25,7 @@ self.addEventListener("fetch", (e) => {
   const { request } = e;
   const url = new URL(request.url);
 
-  // Skip: non-GET, API calls, Supabase, HMR
+  // Skip: non-GET, API, Supabase, HMR
   if (
     request.method !== "GET" ||
     url.pathname.startsWith("/api/") ||
@@ -36,38 +35,38 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
-  // Next.js static chunks — cache first for fast loads
+  // Next.js static chunks — cache first
   if (url.pathname.startsWith("/_next/static/")) {
     e.respondWith(
-      caches.match(request).then(
-        (cached) =>
-          cached ??
-          fetch(request).then((res) => {
-            if (res.ok) {
-              caches.open(CACHE).then((c) => c.put(request, res.clone()));
-            }
-            return res;
-          })
-      )
+      caches.match(request).then((cached) => {
+        if (cached) return cached;
+        return fetch(request).then((res) => {
+          if (res.ok) {
+            const clone = res.clone(); // clone synchronously before any async
+            caches.open(CACHE).then((c) => c.put(request, clone));
+          }
+          return res;
+        });
+      })
     );
     return;
   }
 
-  // Navigation requests — network first, fall back to offline page
+  // Navigation — network first, fall back to cached page or offline.html
   if (request.mode === "navigate") {
     e.respondWith(
       fetch(request)
         .then((res) => {
-          // Cache successful navigation responses for future offline use
           if (res.ok) {
-            caches.open(CACHE).then((c) => c.put(request, res.clone()));
+            const clone = res.clone(); // clone synchronously before any async
+            caches.open(CACHE).then((c) => c.put(request, clone));
           }
           return res;
         })
         .catch(() =>
-          caches.match(request).then(
-            (cached) => cached ?? caches.match(OFFLINE_URL)
-          )
+          caches
+            .match(request)
+            .then((cached) => cached ?? caches.match(OFFLINE_URL))
         )
     );
     return;
@@ -78,7 +77,8 @@ self.addEventListener("fetch", (e) => {
     fetch(request)
       .then((res) => {
         if (res.ok) {
-          caches.open(CACHE).then((c) => c.put(request, res.clone()));
+          const clone = res.clone(); // clone synchronously before any async
+          caches.open(CACHE).then((c) => c.put(request, clone));
         }
         return res;
       })
