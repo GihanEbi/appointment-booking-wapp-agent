@@ -1,13 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// Routes that bypass middleware entirely (API handlers do their own auth)
+// Routes that bypass proxy entirely (API handlers do their own auth)
 const BYPASS_PREFIXES = ["/api/", "/_next", "/favicon.ico"];
 
 // Pages that are publicly accessible (unauthenticated)
 const PUBLIC_PAGES = ["/login", "/staff/login", "/offline"];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (BYPASS_PREFIXES.some((p) => pathname.startsWith(p))) {
