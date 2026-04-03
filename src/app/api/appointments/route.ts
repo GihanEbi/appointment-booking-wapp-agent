@@ -6,8 +6,9 @@ export async function GET(request: Request) {
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = new URL(request.url);
-  const status = searchParams.get("status");
-  const search = searchParams.get("search");
+  const status     = searchParams.get("status");
+  const search     = searchParams.get("search");
+  const assignedTo = searchParams.get("assigned_to");
 
   let query = supabase
     .from("appointments")
@@ -22,6 +23,9 @@ export async function GET(request: Request) {
     query = query.or(
       `customer_name.ilike.%${search}%,service.ilike.%${search}%`
     );
+  }
+  if (assignedTo) {
+    query = query.eq("assigned_user_id", assignedTo);
   }
 
   const { data, error } = await query;

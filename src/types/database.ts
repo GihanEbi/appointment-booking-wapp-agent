@@ -1,7 +1,7 @@
 // Auto-generated from supabase/schema.sql
 // Re-generate with: npx supabase gen types typescript --project-id <id> > src/types/database.ts
 
-export type AppointmentStatus = "pending" | "confirmed" | "canceled";
+export type AppointmentStatus = "pending" | "confirmed" | "canceled" | "completed";
 export type ChatRole = "ai" | "user";
 export type ChatSessionStatus = "active" | "resolved";
 export type AnnouncementStatus = "scheduled" | "sent" | "expired";

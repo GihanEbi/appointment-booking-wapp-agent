@@ -48,7 +48,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${manrope.variable} h-full`} suppressHydrationWarning>
-      <body className="h-full antialiased">
+      <body className="h-full antialiased" suppressHydrationWarning>
         <ThemeProvider>{children}</ThemeProvider>
         <ServiceWorkerRegistration />
       </body>

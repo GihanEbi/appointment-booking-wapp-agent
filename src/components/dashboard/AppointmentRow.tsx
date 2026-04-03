@@ -2,15 +2,17 @@ interface AppointmentRowProps {
   name: string;
   service: string;
   time: string;
-  status: "confirmed" | "pending" | "canceled";
+  status: "confirmed" | "pending" | "canceled" | "completed" | "overdue";
   avatar: string;
   phone: string;
 }
 
 const statusStyles: Record<AppointmentRowProps["status"], { bg: string; text: string; label: string }> = {
-  confirmed: { bg: "var(--primary-container)", text: "var(--on-primary-container)", label: "Confirmed" },
-  pending: { bg: "var(--tertiary-container)", text: "var(--on-tertiary-container)", label: "Pending" },
-  canceled: { bg: "var(--error-container)", text: "var(--error)", label: "Canceled" },
+  confirmed: { bg: "var(--primary-container)",    text: "var(--on-primary-container)",  label: "Confirmed" },
+  pending:   { bg: "var(--tertiary-container)",   text: "var(--on-tertiary-container)", label: "Pending"   },
+  canceled:  { bg: "var(--error-container)",      text: "var(--error)",                 label: "Canceled"  },
+  completed: { bg: "rgba(34,197,94,0.15)",        text: "#16a34a",                      label: "Completed" },
+  overdue:   { bg: "rgba(249,115,22,0.15)",       text: "#ea580c",                      label: "Overdue"   },
 };
 
 export function AppointmentRow({ name, service, time, status, avatar, phone }: AppointmentRowProps) {

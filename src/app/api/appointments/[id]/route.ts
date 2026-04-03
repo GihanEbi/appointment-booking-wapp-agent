@@ -13,7 +13,7 @@ export async function PATCH(
   const body = await request.json();
   const { status, cancel_reason } = body as { status: string; cancel_reason?: string };
 
-  if (!["confirmed", "pending", "canceled"].includes(status)) {
+  if (!["confirmed", "pending", "canceled", "completed"].includes(status)) {
     return Response.json({ error: "Invalid status" }, { status: 400 });
   }
 

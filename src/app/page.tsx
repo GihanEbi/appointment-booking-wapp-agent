@@ -74,7 +74,7 @@ interface Appointment {
   customer_phone: string;
   service: string;
   scheduled_at: string;
-  status: "confirmed" | "pending" | "canceled";
+  status: "confirmed" | "pending" | "canceled" | "completed";
 }
 
 interface Notification {

@@ -1,16 +1,17 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import useSWR from "swr";
 import { AppShell } from "@/components/layout/AppShell";
 import {
   CalendarDays, Plus, Search, CheckCircle, Clock, XCircle, Loader2,
   ChevronLeft, ChevronRight, List, Calendar, AlertTriangle, MessageSquare,
+  CheckCircle2,
 } from "lucide-react";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
-const STATUS_FILTERS = ["All", "Confirmed", "Pending", "Canceled"] as const;
+const STATUS_FILTERS = ["All", "Confirmed", "Pending", "Canceled", "Completed", "Overdue"] as const;
 
 const MONTHS = [
   "January","February","March","April","May","June",
@@ -58,6 +59,8 @@ function timeAgo(iso: string | null | undefined): string {
 function statusUpdatedLabel(status: string): string {
   if (status === "confirmed") return "Confirmed";
   if (status === "canceled")  return "Canceled";
+  if (status === "completed") return "Completed";
+  if (status === "overdue")   return "Overdue";
   return "Received";
 }
 
@@ -71,7 +74,7 @@ interface Appointment {
   customer_phone: string;
   service: string;
   scheduled_at: string;
-  status: "confirmed" | "pending" | "canceled";
+  status: "confirmed" | "pending" | "canceled" | "completed";
   notes?: string | null;
   cancel_reason?: string | null;
   updated_at?: string | null;
@@ -93,15 +96,32 @@ interface CancelTarget {
   scheduled_at: string;
 }
 
+function getOverdueDays(scheduledAt: string): number {
+  const scheduled = new Date(scheduledAt);
+  scheduled.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diff = Math.floor((today.getTime() - scheduled.getTime()) / (1000 * 60 * 60 * 24));
+  return diff > 0 ? diff : 0;
+}
+
+function isOverdue(appt: Appointment): boolean {
+  return appt.status === "confirmed" && getOverdueDays(appt.scheduled_at) > 0;
+}
+
 function statusStyle(status: string) {
-  if (status === "confirmed") return { bg: "var(--primary-container)",  color: "var(--on-primary-container)",  icon: CheckCircle, label: "Confirmed" };
-  if (status === "pending")   return { bg: "var(--tertiary-container)", color: "var(--on-tertiary-container)", icon: Clock,        label: "Pending"   };
-  return                             { bg: "#f443361a",                  color: "#f44336",                      icon: XCircle,      label: "Canceled"  };
+  if (status === "confirmed") return { bg: "var(--primary-container)",    color: "var(--on-primary-container)",  icon: CheckCircle,  label: "Confirmed" };
+  if (status === "pending")   return { bg: "var(--tertiary-container)",   color: "var(--on-tertiary-container)", icon: Clock,        label: "Pending"   };
+  if (status === "completed") return { bg: "rgba(34,197,94,0.15)",        color: "#16a34a",                      icon: CheckCircle2, label: "Completed" };
+  if (status === "overdue")   return { bg: "rgba(249,115,22,0.15)",       color: "#ea580c",                      icon: AlertTriangle,label: "Overdue"   };
+  return                             { bg: "#f443361a",                   color: "#f44336",                      icon: XCircle,      label: "Canceled"  };
 }
 
 function statusColor(status: string) {
   if (status === "confirmed") return "var(--primary)";
   if (status === "pending")   return "#f59e0b";
+  if (status === "completed") return "#16a34a";
+  if (status === "overdue")   return "#ea580c";
   return "#f44336";
 }
 
@@ -130,10 +150,16 @@ function buildCalendarCells(year: number, month: number): CalCell[] {
   return cells;
 }
 
+interface StaffUser { id: string; name: string; email: string; }
+
 export default function AppointmentsPage() {
   const [view,   setView]   = useState<"list" | "calendar">("list");
   const [filter, setFilter] = useState<typeof STATUS_FILTERS[number]>("All");
   const [search, setSearch] = useState("");
+
+  // Staff-user filter (admin view of a sub-user's schedule)
+  const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
+  const { data: staffUsers = [] } = useSWR<StaffUser[]>("/api/staff-users", fetcher, { refreshInterval: 0 });
 
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState<NewApptForm>({
@@ -142,7 +168,8 @@ export default function AppointmentsPage() {
   const [saving, setSaving] = useState(false);
 
   // Per-appointment loading state
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [confirmingId,  setConfirmingId]  = useState<string | null>(null);
+  const [completingId,  setCompletingId]  = useState<string | null>(null);
 
   // Cancel modal
   const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
@@ -150,20 +177,33 @@ export default function AppointmentsPage() {
   const [cancelCustom, setCancelCustom] = useState("");
   const [canceling, setCanceling] = useState(false);
 
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
   const today = new Date();
   const [calYear,      setCalYear]      = useState(today.getFullYear());
   const [calMonth,     setCalMonth]     = useState(today.getMonth());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const listParams = new URLSearchParams();
-  if (filter !== "All") listParams.set("status", filter.toLowerCase());
-  if (search)           listParams.set("search", search);
+  if (filter === "Overdue")       listParams.set("status", "confirmed");
+  else if (filter !== "All")      listParams.set("status", filter.toLowerCase());
+  if (search)                     listParams.set("search", search);
+  if (selectedStaffId)            listParams.set("assigned_to", selectedStaffId);
   const { data: appointments, mutate } = useSWR<Appointment[]>(
     `/api/appointments?${listParams}`, fetcher, { refreshInterval: 15000 }
   );
 
+  const displayedAppointments = useMemo(() => {
+    if (!appointments || !mounted) return appointments;
+    if (filter === "Overdue") return appointments.filter(isOverdue);
+    return appointments;
+  }, [appointments, filter, mounted]);
+
+  const allCalParams = new URLSearchParams();
+  if (selectedStaffId) allCalParams.set("assigned_to", selectedStaffId);
   const { data: allAppointments, mutate: mutateAll } = useSWR<Appointment[]>(
-    "/api/appointments", fetcher, { refreshInterval: 30000 }
+    `/api/appointments?${allCalParams}`, fetcher, { refreshInterval: 30000 }
   );
 
   const apptsByDate = useMemo(() => {
@@ -218,6 +258,17 @@ export default function AppointmentsPage() {
     setConfirmingId(null);
   }
 
+  async function handleComplete(id: string) {
+    setCompletingId(id);
+    const res = await fetch(`/api/appointments/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "completed" }),
+    });
+    if (res.ok) patchCaches(await res.json());
+    setCompletingId(null);
+  }
+
   function openCancel(appt: Appointment) {
     setCancelTarget({ id: appt.id, name: appt.customer_name, service: appt.service, scheduled_at: appt.scheduled_at });
     setCancelReason("");
@@ -256,9 +307,12 @@ export default function AppointmentsPage() {
 
   // ── Appointment card used in both list + calendar panel ──
   function ApptRow({ appt }: { appt: Appointment }) {
-    const badge     = statusStyle(appt.status);
-    const BadgeIcon = badge.icon;
+    const overdueDays  = (mounted && appt.status === "confirmed") ? getOverdueDays(appt.scheduled_at) : 0;
+    const displayStatus = overdueDays > 0 ? "overdue" : appt.status;
+    const badge        = statusStyle(displayStatus);
+    const BadgeIcon    = badge.icon;
     const isConfirming = confirmingId === appt.id;
+    const isCompleting = completingId === appt.id;
 
     const ts = appt.updated_at || appt.created_at;
 
@@ -277,8 +331,16 @@ export default function AppointmentsPage() {
         >
           <BadgeIcon className="w-3 h-3 flex-shrink-0" style={{ color: badge.color }} />
           <span className="text-[10px] font-semibold" style={{ color: badge.color }}>
-            {statusUpdatedLabel(appt.status)}
+            {statusUpdatedLabel(displayStatus)}
           </span>
+          {overdueDays > 0 && (
+            <>
+              <span className="text-[10px]" style={{ color: badge.color, opacity: 0.5 }}>·</span>
+              <span className="text-[10px] font-semibold" style={{ color: badge.color }}>
+                Overdue by {overdueDays} day{overdueDays !== 1 ? "s" : ""}
+              </span>
+            </>
+          )}
           {ts && (
             <>
               <span className="text-[10px]" style={{ color: badge.color, opacity: 0.5 }}>·</span>
@@ -330,7 +392,7 @@ export default function AppointmentsPage() {
 
         {/* Action buttons */}
         <div className="flex gap-1 flex-shrink-0 mt-0.5">
-          {isConfirming ? (
+          {(isConfirming || isCompleting) ? (
             <Loader2 className="w-4 h-4 animate-spin mx-2 mt-1" style={{ color: "var(--primary)" }} />
           ) : (
             <>
@@ -341,6 +403,15 @@ export default function AppointmentsPage() {
                   style={{ background: "var(--primary-container)", color: "var(--on-primary-container)" }}
                 >
                   Confirm
+                </button>
+              )}
+              {appt.status === "confirmed" && (
+                <button
+                  onClick={() => handleComplete(appt.id)}
+                  className="text-xs px-2.5 py-1.5 rounded-lg font-semibold transition-all hover:opacity-80"
+                  style={{ background: "rgba(34,197,94,0.15)", color: "#16a34a" }}
+                >
+                  Complete
                 </button>
               )}
               {(appt.status === "pending" || appt.status === "confirmed") && (
@@ -371,22 +442,26 @@ export default function AppointmentsPage() {
         <div className="flex flex-col sm:flex-row sm:items-center gap-4 justify-between">
           <div>
             <h1 className="text-2xl font-bold" style={{ color: "var(--on-surface)" }}>
-              Appointment Management Hub
+              {selectedStaffId
+                ? `${staffUsers.find((u) => u.id === selectedStaffId)?.name ?? "Staff"}'s Schedule`
+                : "Appointment Management Hub"}
             </h1>
             <p className="text-sm mt-1" style={{ color: "var(--on-surface-variant)" }}>
-              Manage all client bookings from your AI-powered WhatsApp agent.
+              {selectedStaffId
+                ? "Viewing appointments assigned to this team member."
+                : "Manage all client bookings from your AI-powered WhatsApp agent."}
             </p>
           </div>
           <div className="flex items-center gap-3 self-start sm:self-auto">
-            <div className="flex rounded-xl p-1 gap-1" style={{ background: "var(--surface-container-high)" }}>
+            <div className="flex rounded-xl p-1 gap-1" style={{ backgroundColor: "var(--surface-container-high)" }}>
               {(["list", "calendar"] as const).map((v) => (
                 <button
                   key={v}
                   onClick={() => setView(v)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all capitalize"
                   style={{
-                    background: view === v ? "var(--primary)"    : "transparent",
-                    color:      view === v ? "var(--on-primary)" : "var(--on-surface-variant)",
+                    backgroundColor: view === v ? "var(--primary)"    : "transparent",
+                    color:           view === v ? "var(--on-primary)" : "var(--on-surface-variant)",
                   }}
                 >
                   {v === "list" ? <List className="w-3.5 h-3.5" /> : <Calendar className="w-3.5 h-3.5" />}
@@ -403,6 +478,38 @@ export default function AppointmentsPage() {
             </button>
           </div>
         </div>
+
+        {/* ── Staff-user selector (only shown when staff users exist) ── */}
+        {staffUsers.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-semibold" style={{ color: "var(--on-surface-variant)" }}>
+              View as:
+            </span>
+            <button
+              onClick={() => { setSelectedStaffId(null); setSelectedDate(null); }}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+              style={{
+                backgroundColor: selectedStaffId === null ? "var(--primary)" : "var(--surface-container-low)",
+                color:           selectedStaffId === null ? "var(--on-primary)" : "var(--on-surface-variant)",
+              }}
+            >
+              All
+            </button>
+            {staffUsers.map((u) => (
+              <button
+                key={u.id}
+                onClick={() => { setSelectedStaffId(u.id); setSelectedDate(null); }}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+                style={{
+                  backgroundColor: selectedStaffId === u.id ? "var(--primary)" : "var(--surface-container-low)",
+                  color:           selectedStaffId === u.id ? "var(--on-primary)" : "var(--on-surface-variant)",
+                }}
+              >
+                {u.name}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* ── LIST VIEW ── */}
         {view === "list" && (
@@ -431,8 +538,8 @@ export default function AppointmentsPage() {
                     onClick={() => setFilter(f)}
                     className="px-3 py-2 rounded-xl text-xs font-medium transition-all"
                     style={{
-                      background: filter === f ? "var(--primary)"    : "var(--surface-container-low)",
-                      color:      filter === f ? "var(--on-primary)" : "var(--on-surface-variant)",
+                      backgroundColor: filter === f ? "var(--primary)"    : "var(--surface-container-low)",
+                      color:           filter === f ? "var(--on-primary)" : "var(--on-surface-variant)",
                     }}
                   >
                     {f}
@@ -453,21 +560,21 @@ export default function AppointmentsPage() {
                 </div>
                 <span className="text-xs px-2 py-1 rounded-full font-medium"
                   style={{ background: "var(--surface-container-low)", color: "var(--on-surface-variant)" }}>
-                  {appointments?.length ?? 0} total
+                  {displayedAppointments?.length ?? 0} total
                 </span>
               </div>
 
-              {!appointments ? (
+              {!displayedAppointments ? (
                 <div className="flex justify-center py-12">
                   <Loader2 className="w-6 h-6 animate-spin" style={{ color: "var(--primary)" }} />
                 </div>
-              ) : appointments.length === 0 ? (
+              ) : displayedAppointments.length === 0 ? (
                 <div className="text-center py-12 text-sm" style={{ color: "var(--on-surface-variant)" }}>
                   No appointments found. Bookings made via WhatsApp will appear here.
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {appointments.map((appt) => <ApptRow key={appt.id} appt={appt} />)}
+                  {displayedAppointments.map((appt) => <ApptRow key={appt.id} appt={appt} />)}
                 </div>
               )}
             </div>
@@ -548,19 +655,23 @@ export default function AppointmentsPage() {
                         </span>
                       </div>
                       <div className="space-y-0.5">
-                        {cellAppts.slice(0, 3).map((appt) => (
+                        {cellAppts.slice(0, 3).map((appt) => {
+                          const cellDisplayStatus = (mounted && appt.status === "confirmed" && getOverdueDays(appt.scheduled_at) > 0) ? "overdue" : appt.status;
+                          const dotColor = statusColor(cellDisplayStatus);
+                          return (
                           <div key={appt.id}
                             className="flex items-center gap-1 px-1.5 py-0.5 rounded-md truncate"
-                            style={{ background: `${statusColor(appt.status)}22` }}>
+                            style={{ background: `${dotColor}22` }}>
                             <div className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                              style={{ background: statusColor(appt.status) }} />
+                              style={{ background: dotColor }} />
                             <span className="truncate font-medium"
-                              style={{ color: statusColor(appt.status), fontSize: "10px", lineHeight: "1.4" }}>
+                              style={{ color: dotColor, fontSize: "10px", lineHeight: "1.4" }}>
                               {new Date(appt.scheduled_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}{" "}
                               {appt.customer_name.split(" ")[0]}
                             </span>
                           </div>
-                        ))}
+                          );
+                        })}
                         {cellAppts.length > 3 && (
                           <p className="pl-1 font-medium" style={{ color: "var(--on-surface-variant)", fontSize: "10px" }}>
                             +{cellAppts.length - 3} more
@@ -574,11 +685,13 @@ export default function AppointmentsPage() {
             </div>
 
             {/* Legend */}
-            <div className="flex items-center gap-5 px-1">
+            <div className="flex items-center gap-5 px-1 flex-wrap">
               {[
-                { label: "Confirmed", color: "var(--primary)" },
-                { label: "Pending",   color: "#f59e0b"        },
-                { label: "Canceled",  color: "#f44336"        },
+                { label: "Confirmed",  color: "var(--primary)" },
+                { label: "Pending",    color: "#f59e0b"        },
+                { label: "Canceled",   color: "#f44336"        },
+                { label: "Completed",  color: "#16a34a"        },
+                { label: "Overdue",    color: "#ea580c"        },
               ].map(({ label, color }) => (
                 <div key={label} className="flex items-center gap-1.5 text-xs"
                   style={{ color: "var(--on-surface-variant)" }}>
@@ -603,8 +716,8 @@ export default function AppointmentsPage() {
                       {selectedDayAppts.length} appointment{selectedDayAppts.length !== 1 ? "s" : ""}
                     </p>
                   </div>
-                  <div className="flex gap-2">
-                    {(["confirmed","pending","canceled"] as const).map((s) => {
+                  <div className="flex gap-2 flex-wrap">
+                    {(["confirmed","pending","canceled","completed"] as const).map((s) => {
                       const count = selectedDayAppts.filter((a) => a.status === s).length;
                       if (!count) return null;
                       const st = statusStyle(s);

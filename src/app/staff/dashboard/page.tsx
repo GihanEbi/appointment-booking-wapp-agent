@@ -35,9 +35,11 @@ function fmtTime(iso: string) {
 }
 
 const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
-  pending:   { bg: "rgba(59,130,246,0.12)",  color: "#1d4ed8", label: "Pending" },
+  pending:   { bg: "rgba(59,130,246,0.12)",  color: "#1d4ed8", label: "Pending"   },
   confirmed: { bg: "rgba(34,197,94,0.12)",   color: "#16a34a", label: "Confirmed" },
-  canceled:  { bg: "rgba(239,68,68,0.12)",   color: "#dc2626", label: "Canceled" },
+  canceled:  { bg: "rgba(239,68,68,0.12)",   color: "#dc2626", label: "Canceled"  },
+  completed: { bg: "rgba(34,197,94,0.15)",   color: "#15803d", label: "Completed" },
+  overdue:   { bg: "rgba(249,115,22,0.15)",  color: "#ea580c", label: "Overdue"   },
 };
 
 export default function StaffDashboardPage() {

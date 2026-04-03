@@ -67,7 +67,7 @@ create table if not exists appointments (
   service         text not null default '',
   scheduled_at    timestamptz not null,
   status          text not null default 'pending'
-                  check (status in ('pending', 'confirmed', 'canceled')),
+                  check (status in ('pending', 'confirmed', 'canceled', 'completed')),
   notes           text,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()

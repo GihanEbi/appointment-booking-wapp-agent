@@ -12,7 +12,8 @@
       "Bash(node -e \"const ai = require\\(''''ai''''\\); console.log\\(Object.keys\\(ai\\).filter\\(k => k.toLowerCase\\(\\).includes\\(''''step''''\\) || k.toLowerCase\\(\\).includes\\(''''round''''\\)\\)\\)\")",
       "Bash(node scripts/generate-icons.mjs)",
       "Bash(xargs grep:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(grep:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
