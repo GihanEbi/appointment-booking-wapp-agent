@@ -9,23 +9,40 @@ create extension if not exists vector;
 -- ── 1. profiles ──────────────────────────────────────────────
 -- One row per dashboard user (extends Supabase auth.users)
 create table if not exists profiles (
-  id            uuid primary key references auth.users(id) on delete cascade,
-  business_name text not null default '',
-  whatsapp_phone text not null default '',
-  created_at    timestamptz not null default now(),
-  updated_at    timestamptz not null default now()
+  id                   uuid primary key references auth.users(id) on delete cascade,
+  business_name        text not null default '',
+  whatsapp_phone       text not null default '',
+  onboarding_completed boolean not null default false,
+  created_at           timestamptz not null default now(),
+  updated_at           timestamptz not null default now()
 );
 
 -- ── 2. business_details ──────────────────────────────────────
 create table if not exists business_details (
-  id            uuid primary key default gen_random_uuid(),
-  profile_id    uuid not null references profiles(id) on delete cascade,
-  description   text not null default '',
-  ai_tone       text not null default 'Professional & Friendly',
-  working_hours text not null default '9:00 AM – 7:00 PM',
-  created_at    timestamptz not null default now(),
-  updated_at    timestamptz not null default now(),
+  id                uuid primary key default gen_random_uuid(),
+  profile_id        uuid not null references profiles(id) on delete cascade,
+  description       text not null default '',
+  ai_tone           text not null default 'Professional & Friendly',
+  working_hours     text not null default '9:00 AM – 7:00 PM',
+  category          text,                          -- e.g. 'Beauty', 'Medical & Health'
+  category_other    text,                          -- when category = 'Other'
+  auto_confirm      boolean not null default false, -- auto-confirm appointments
+  allow_staff_pick  boolean not null default true,  -- customers can pick staff via AI
+  schedule_mode     text check (schedule_mode in ('daily', 'weekly', 'custom')),
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now(),
   unique(profile_id)
+);
+
+-- ── 2b. services (sub-services with optional prices) ─────────
+create table if not exists services (
+  id          uuid primary key default gen_random_uuid(),
+  profile_id  uuid not null references profiles(id) on delete cascade,
+  name        text not null,
+  price       text,           -- free-form e.g. "$25", "From $50", "Free"
+  description text,
+  sort_order  int  not null default 0,
+  created_at  timestamptz not null default now()
 );
 
 -- ── 3. availability_slots ─────────────────────────────────────
@@ -144,6 +161,7 @@ create table if not exists notifications (
 
 alter table profiles           enable row level security;
 alter table business_details   enable row level security;
+alter table services           enable row level security;
 alter table availability_slots enable row level security;
 alter table training_docs      enable row level security;
 alter table appointments       enable row level security;
@@ -159,6 +177,10 @@ create policy "profiles: own row" on profiles
 
 -- business_details
 create policy "business_details: own" on business_details
+  for all using (profile_id = auth.uid());
+
+-- services
+create policy "services: own" on services
   for all using (profile_id = auth.uid());
 
 -- availability_slots

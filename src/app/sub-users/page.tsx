@@ -5,7 +5,7 @@ import useSWR from "swr";
 import { AppShell } from "@/components/layout/AppShell";
 import {
   Users, Plus, Trash2, Loader2, X, Save, AlertTriangle,
-  Mail, Lock, User, FileText, Eye, EyeOff,
+  Mail, Lock, User, FileText, Eye, EyeOff, Pencil,
   ShieldCheck, Info, Calendar, ChevronLeft, ChevronRight,
   CheckCircle, Clock, XCircle, CheckCircle2,
 } from "lucide-react";
@@ -451,10 +451,20 @@ export default function SubUsersPage() {
   const [showPwd, setShowPwd]             = useState(false);
   const [calendarUser, setCalendarUser]   = useState<SubUser | null>(null);
 
+  // Create form fields
   const [name, setName]         = useState("");
   const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
   const [bio, setBio]           = useState("");
+
+  // Edit state
+  const [editUser, setEditUser]       = useState<SubUser | null>(null);
+  const [editName, setEditName]       = useState("");
+  const [editBio, setEditBio]         = useState("");
+  const [editPwd, setEditPwd]         = useState("");
+  const [showEditPwd, setShowEditPwd] = useState(false);
+  const [editSaving, setEditSaving]   = useState(false);
+  const [editError, setEditError]     = useState<string | null>(null);
 
   const { data: rawSubUsers, mutate, isLoading } =
     useSWR<SubUser[]>("/api/staff-users", fetcher);
@@ -464,6 +474,37 @@ export default function SubUsersPage() {
     setName(""); setEmail(""); setPassword(""); setBio("");
     setShowPwd(false); setCreateError(null);
     setShowCreate(true);
+  }
+
+  function openEdit(user: SubUser) {
+    setEditUser(user);
+    setEditName(user.name);
+    setEditBio(user.bio ?? "");
+    setEditPwd("");
+    setShowEditPwd(false);
+    setEditError(null);
+  }
+
+  async function handleEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editUser) return;
+    setEditSaving(true);
+    setEditError(null);
+    const body: Record<string, string> = { name: editName, bio: editBio };
+    if (editPwd.trim()) body.password = editPwd;
+    const res = await fetch(`/api/staff-users/${editUser.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    setEditSaving(false);
+    if (res.ok) {
+      setEditUser(null);
+      await mutate();
+    } else {
+      setEditError(data.error ?? "Failed to update sub user");
+    }
   }
 
   async function handleCreate(e: React.FormEvent) {
@@ -549,6 +590,7 @@ export default function SubUsersPage() {
                 user={u}
                 deleting={deletingId === u.id}
                 onDelete={() => setDeleteConfirm(u)}
+                onEdit={() => openEdit(u)}
                 onViewCalendar={() => setCalendarUser(u)}
               />
             ))}
@@ -682,6 +724,110 @@ export default function SubUsersPage() {
         </div>
       )}
 
+      {/* ══ Edit Modal ══ */}
+      {editUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)" }}
+          onClick={(e) => e.target === e.currentTarget && setEditUser(null)}>
+          <div className="w-full max-w-md rounded-2xl"
+            style={{ background: "var(--surface-container-lowest)", boxShadow: "0px 24px 48px rgba(20,29,36,0.2)" }}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 rounded-t-2xl"
+              style={{ borderBottom: "1px solid var(--outline-variant)" }}>
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center"
+                  style={{ background: "var(--secondary-container)", color: "var(--secondary)" }}>
+                  <Pencil className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <p className="font-bold text-sm" style={{ color: "var(--on-surface)" }}>Edit Sub User</p>
+                  <p className="text-xs" style={{ color: "var(--on-surface-variant)" }}>{editUser.email}</p>
+                </div>
+              </div>
+              <button onClick={() => setEditUser(null)}
+                className="w-7 h-7 flex items-center justify-center rounded-lg"
+                style={{ background: "var(--surface-container-high)", color: "var(--on-surface-variant)" }}>
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleEdit} className="p-5 space-y-4 rounded-b-2xl">
+              {editError && (
+                <div className="flex items-start gap-2 p-3 rounded-xl text-xs"
+                  style={{ background: "var(--error-container)", color: "var(--error)" }}>
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  {editError}
+                </div>
+              )}
+              {/* Name */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold" style={{ color: "var(--on-surface-variant)" }}>
+                  Full Name <span style={{ color: "var(--error)" }}>*</span>
+                </label>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: "var(--outline)" }} />
+                  <input required value={editName} onChange={(e) => setEditName(e.target.value)}
+                    placeholder="e.g. Sarah Johnson"
+                    className="w-full pl-10 pr-4 py-2.5 text-sm rounded-xl outline-none"
+                    style={{ background: "var(--surface-container-low)", color: "var(--on-surface)", border: "2px solid transparent" }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = "var(--primary)")}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = "transparent")} />
+                </div>
+              </div>
+              {/* Bio */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold" style={{ color: "var(--on-surface-variant)" }}>
+                  Bio / Role
+                </label>
+                <div className="relative">
+                  <FileText className="absolute left-3 top-3 w-4 h-4" style={{ color: "var(--outline)" }} />
+                  <textarea rows={2} value={editBio} onChange={(e) => setEditBio(e.target.value)}
+                    placeholder="e.g. Senior stylist, specialises in colour treatments"
+                    className="w-full pl-10 pr-4 py-2.5 text-sm rounded-xl outline-none resize-none"
+                    style={{ background: "var(--surface-container-low)", color: "var(--on-surface)", border: "2px solid transparent" }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = "var(--primary)")}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = "transparent")} />
+                </div>
+              </div>
+              {/* New Password (optional) */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold" style={{ color: "var(--on-surface-variant)" }}>
+                  New Password <span className="font-normal opacity-60">(leave blank to keep current)</span>
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: "var(--outline)" }} />
+                  <input type={showEditPwd ? "text" : "password"}
+                    value={editPwd} onChange={(e) => setEditPwd(e.target.value)}
+                    placeholder="Min. 8 characters" minLength={editPwd ? 8 : undefined}
+                    className="w-full pl-10 pr-10 py-2.5 text-sm rounded-xl outline-none"
+                    style={{ background: "var(--surface-container-low)", color: "var(--on-surface)", border: "2px solid transparent" }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = "var(--primary)")}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = "transparent")} />
+                  <button type="button" onClick={() => setShowEditPwd(!showEditPwd)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2"
+                    style={{ color: "var(--on-surface-variant)" }}>
+                    {showEditPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button type="button" onClick={() => setEditUser(null)}
+                  className="flex-1 py-2.5 text-sm font-semibold rounded-xl"
+                  style={{ background: "var(--surface-container-low)", color: "var(--on-surface-variant)" }}>
+                  Cancel
+                </button>
+                <button type="submit" disabled={editSaving}
+                  className="flex-1 btn-primary py-2.5 text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-60">
+                  {editSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* ══ Delete Confirm Modal ══ */}
       {deleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -722,10 +868,11 @@ export default function SubUsersPage() {
 }
 
 // ── Sub User Card ─────────────────────────────────────────────────────────────
-function SubUserCard({ user, deleting, onDelete, onViewCalendar }: {
+function SubUserCard({ user, deleting, onDelete, onEdit, onViewCalendar }: {
   user: SubUser;
   deleting: boolean;
   onDelete: () => void;
+  onEdit: () => void;
   onViewCalendar: () => void;
 }) {
   const initials = user.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
@@ -774,6 +921,15 @@ function SubUserCard({ user, deleting, onDelete, onViewCalendar }: {
               style={{ backgroundColor: "var(--primary-container)", color: "var(--primary)" }}
             >
               <Calendar className="w-3.5 h-3.5" />
+            </button>
+            {/* Edit button */}
+            <button
+              onClick={onEdit}
+              title="Edit sub user"
+              className="w-7 h-7 flex items-center justify-center rounded-lg transition-all hover:opacity-80"
+              style={{ backgroundColor: "var(--secondary-container)", color: "var(--secondary)" }}
+            >
+              <Pencil className="w-3.5 h-3.5" />
             </button>
             {/* Delete button */}
             {deleting ? (

@@ -13,7 +13,9 @@
       "Bash(node scripts/generate-icons.mjs)",
       "Bash(xargs grep:*)",
       "Bash(npm run:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(npx next:*)",
+      "Bash(node:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

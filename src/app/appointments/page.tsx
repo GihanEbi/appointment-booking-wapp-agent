@@ -379,13 +379,28 @@ export default function AppointmentsPage() {
           )}
           {/* Cancel reason shown on canceled cards */}
           {appt.status === "canceled" && appt.cancel_reason && (
-            <div className="flex items-center gap-1 mt-1">
+            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
               <span
                 className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
                 style={{ background: "#f443361a", color: "#f44336" }}
               >
                 Reason: {appt.cancel_reason}
               </span>
+              {/* Show "By Customer" tag when canceled via AI chat */}
+              {(appt.cancel_reason !== "Schedule conflict" &&
+                appt.cancel_reason !== "Customer request" &&
+                appt.cancel_reason !== "No-show by customer" &&
+                appt.cancel_reason !== "Overbooked" &&
+                appt.cancel_reason !== "Service unavailable" &&
+                appt.cancel_reason !== "Staff unavailable") && (
+                <span
+                  className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1"
+                  style={{ background: "rgba(37,211,102,0.12)", color: "#16a34a" }}
+                >
+                  <MessageSquare className="w-2.5 h-2.5" />
+                  By Customer (via chat)
+                </span>
+              )}
             </div>
           )}
         </div>

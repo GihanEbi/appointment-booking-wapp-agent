@@ -26,19 +26,33 @@ export async function PUT(request: NextRequest) {
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json();
-  const { description, ai_tone, working_hours } = body;
+  const {
+    description,
+    ai_tone,
+    working_hours,
+    category,
+    category_other,
+    auto_confirm,
+    allow_staff_pick,
+    schedule_mode,
+  } = body;
+
+  const upsertPayload: Record<string, unknown> = {
+    profile_id: user.id,
+  };
+
+  if (description       !== undefined) upsertPayload.description       = description;
+  if (ai_tone           !== undefined) upsertPayload.ai_tone           = ai_tone;
+  if (working_hours     !== undefined) upsertPayload.working_hours     = working_hours;
+  if (category          !== undefined) upsertPayload.category          = category;
+  if (category_other    !== undefined) upsertPayload.category_other    = category_other;
+  if (auto_confirm      !== undefined) upsertPayload.auto_confirm      = auto_confirm;
+  if (allow_staff_pick  !== undefined) upsertPayload.allow_staff_pick  = allow_staff_pick;
+  if (schedule_mode     !== undefined) upsertPayload.schedule_mode     = schedule_mode;
 
   const { data, error } = await supabase
     .from("business_details")
-    .upsert(
-      {
-        profile_id: user.id,
-        description: description ?? "",
-        ai_tone: ai_tone ?? "Professional & Friendly",
-        working_hours: working_hours ?? "9:00 AM – 7:00 PM",
-      },
-      { onConflict: "profile_id" }
-    )
+    .upsert(upsertPayload, { onConflict: "profile_id" })
     .select()
     .single();
 

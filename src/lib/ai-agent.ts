@@ -68,9 +68,11 @@ async function loadContext(profileId: string) {
 
   const now = new Date().toISOString();
 
-  const [bizRes, slotsRes, announcementsRes, staffRes] = await Promise.all([
+  const [profileRes, bizRes, slotsRes, servicesRes, announcementsRes, staffRes] = await Promise.all([
+    db.from("profiles").select("business_name").eq("id", profileId).single(),
     db.from("business_details").select("*").eq("profile_id", profileId).single(),
-    db.from("availability_slots").select("*").eq("profile_id", profileId),
+    db.from("availability_slots").select("*").eq("profile_id", profileId).order("day_of_week").order("start_time"),
+    db.from("services").select("name, price, description").eq("profile_id", profileId).order("sort_order").order("created_at"),
     db
       .from("announcements")
       .select("title, message, scheduled_for")
@@ -97,8 +99,10 @@ async function loadContext(profileId: string) {
     }));
 
   return {
+    businessName: (profileRes.data?.business_name as string | null) ?? null,
     business: bizRes.data,
     slots: slotsRes.data ?? [],
+    services: (servicesRes.data ?? []) as { name: string; price: string | null; description: string | null }[],
     announcements: announcementsRes.data ?? [],
     staffMembers,
   };
@@ -144,16 +148,22 @@ async function saveMessages(
     .eq("id", sessionId);
 }
 
-// ── Parse "09:00 AM" / "9:00 AM" slot times into { hour, minute } ─
+// ── Parse slot times — handles both "13:00" (24h) and "1:00 PM" (12h) ─
 function parseSlotTime(timeStr: string): { hour: number; minute: number } {
-  const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-  if (!match) return { hour: 0, minute: 0 };
-  let hour = parseInt(match[1], 10);
-  const minute = parseInt(match[2], 10);
-  const period = match[3].toUpperCase();
-  if (period === "PM" && hour !== 12) hour += 12;
-  if (period === "AM" && hour === 12) hour = 0;
-  return { hour, minute };
+  if (!timeStr) return { hour: 0, minute: 0 };
+  // 12-hour format: "9:00 AM" / "1:00 PM"
+  const ampm = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (ampm) {
+    let hour = parseInt(ampm[1], 10);
+    const minute = parseInt(ampm[2], 10);
+    const period = ampm[3].toUpperCase();
+    if (period === "PM" && hour !== 12) hour += 12;
+    if (period === "AM" && hour === 12) hour = 0;
+    return { hour, minute };
+  }
+  // 24-hour format: "13:00" or "13:00:00"
+  const parts = timeStr.split(":").map(Number);
+  return { hour: parts[0] ?? 0, minute: parts[1] ?? 0 };
 }
 
 // ── Get UTC offset string for a timezone e.g. "+05:30" ────────────
@@ -203,7 +213,9 @@ function buildSystemPrompt(
   timezone: string,
   utcOffset: string
 ): string {
-  const { business, slots, announcements, staffMembers } = context;
+  const { businessName, business, slots, services, announcements, staffMembers } = context;
+
+  const name = businessName || business?.description?.split(".")[0] || "this business";
 
   const formattedSlots =
     slots.length > 0
@@ -214,6 +226,18 @@ function buildSystemPrompt(
           )
           .join("\n")
       : "No availability configured yet.";
+
+  const formattedServices =
+    services.length > 0
+      ? services
+          .map((s) => {
+            let line = `• ${s.name}`;
+            if (s.price) line += ` — ${s.price}`;
+            if (s.description) line += `\n  ${s.description}`;
+            return line;
+          })
+          .join("\n")
+      : "";
 
   const formattedAnnouncements =
     announcements.length > 0
@@ -231,7 +255,7 @@ function buildSystemPrompt(
   const formattedStaff =
     staffMembers.length > 0
       ? staffMembers
-          .map((s) => `• ${s.name} (ID: ${s.id})${s.bio ? ` — ${s.bio}` : ""}`)
+          .map((s, i) => `${i + 1}. ${s.name}${s.bio ? ` — ${s.bio}` : ""} (ID: ${s.id})`)
           .join("\n")
       : "";
 
@@ -243,66 +267,92 @@ function buildSystemPrompt(
     day: "numeric",
   });
 
-  return `You are a professional AI booking assistant for ${business?.description ? "this business" : "a business"}.
-Your job is to help customers on WhatsApp with bookings, inquiries, and information.
+  const confirmationPolicy = business?.auto_confirm
+    ? "Appointments are AUTO-CONFIRMED immediately upon booking — tell the customer their appointment is confirmed."
+    : "Appointments are PENDING until the business owner reviews them. After booking, tell the customer their request is recorded and the team will confirm via WhatsApp shortly.";
 
-## Business Description
+  return `You are a professional AI booking assistant for ${name}.
+Your job is to help customers on WhatsApp with bookings, inquiries, and information about ${name}.
+
+IMPORTANT: Always refer to the business by its exact name: "${name}". Never say "[insert salon name]" or leave the name blank.
+
+## Business Name
+${name}
+
+## Business Category
+${business?.category ? `${business.category}${business.category === "Other" && business.category_other ? ` (${business.category_other})` : ""}` : "General business"}
+
+## About This Business
 ${business?.description || "A professional service business."}
 
-## Working Hours
-${business?.working_hours || "Standard business hours."}
+${formattedServices ? `## Services Offered\n${formattedServices}\n` : ""}
+
+## Availability (Weekly Schedule)
+${formattedSlots}
 
 ## Today's Date
 ${today}
 
-## Business Timezone
+## Timezone
 ${timezone} (UTC${utcOffset})
-IMPORTANT: All appointment times are in this timezone. When generating ISO 8601 datetimes always append the offset: e.g. "2026-04-01T09:00:00${utcOffset}"
+All appointment times are in this timezone. When generating ISO 8601 datetimes always append the offset: e.g. "2026-04-01T09:00:00${utcOffset}"
 
-## Available Time Slots
-${formattedSlots}
+## Confirmation Policy
+${confirmationPolicy}
 
-${
-  formattedStaff
-    ? `## Our Team
-${formattedStaff}
-
-Use this information to answer questions about staff members and their specialties. If a customer asks about a specific team member, refer to their bio above. When a customer wants to book with a specific staff member, use their ID in the staffMemberId field of bookAppointment.
-`
-    : ""
-}${
-  formattedAnnouncements
-    ? `## Active Schedule Announcements (CRITICAL — read before checking availability)\n${formattedAnnouncements}\n\nIMPORTANT: These announcements represent real schedule changes. If an announcement says the business is closed, not working, or unavailable on a specific day or date, you MUST NOT offer any time slots for that day/date — even if slots exist in the availability configuration. Treat these as hard overrides.\n`
-    : ""
-}${
-  ragChunks
-    ? `## Knowledge Base (use this to answer service/pricing questions)\n${ragChunks}\n`
-    : ""
-}
+${business?.allow_staff_pick && formattedStaff ? `## Our Team\n${formattedStaff}\n\nCustomers may choose a preferred team member. Use their ID in bookAppointment.\n` : ""}
+${formattedAnnouncements ? `## Schedule Announcements (CRITICAL — overrides availability)\n${formattedAnnouncements}\n\nIf an announcement marks a day as closed or unavailable, do NOT offer slots for that day even if the schedule shows availability.\n` : ""}
+${ragChunks ? `## Knowledge Base (from uploaded documents — use for pricing, policies, FAQs)\n${ragChunks}\n` : ""}
 ## Customer
-You are speaking with: ${customerName || "a customer"} (via WhatsApp)
+You are speaking with: ${customerName || "a customer"}
 
-## Booking Flow (IMPORTANT — follow exactly)
-1. Customer asks to book → call checkExistingBooking first.
-2. If no existing booking → ask for preferred date (and staff member if relevant), then call checkAvailability.
-3. Before showing slots — check Active Schedule Announcements. If any announcement blocks the requested date/day, inform the customer and suggest alternative dates instead.
-4. Customer picks an unblocked slot → call bookAppointment to record it.
-4. After bookAppointment succeeds → tell the customer:
-   "Your appointment request has been recorded! ✅ Our team will review and confirm it shortly. You'll receive a WhatsApp message once it's confirmed or if any changes are needed."
-   NEVER say the appointment is "confirmed" — it is PENDING until the business owner reviews it.
-5. Customer-initiated cancellations → use cancelAppointment after verifying the ID from checkExistingBooking.
+## Booking Flow
+When a customer wants to book an appointment, follow these steps IN ORDER — do NOT skip or reorder:
 
-## Instructions
-- Be warm, professional, and concise. Use WhatsApp-friendly formatting (short paragraphs, emojis OK).
-- ALWAYS call checkExistingBooking first whenever a customer mentions booking, appointments, or scheduling.
-- If the customer already has an active upcoming appointment, show them their booking details and do NOT offer new slots. Only proceed if they explicitly ask to cancel first.
-- Each customer may only hold one active appointment at a time.
-- When a customer wants to book: ask for their preferred date (get a specific date, not just a day name), then call checkAvailability with that date in YYYY-MM-DD format.
-- checkAvailability already filters out booked slots — only show what it returns.
-- Use bookAppointment to record a booking — do NOT just say "I've booked you in" without calling the tool.
-- Use cancelAppointment if a customer asks to cancel — confirm the appointment ID from checkExistingBooking first.
-- If a question is outside your scope, politely say you'll pass it to the team.
-- Keep responses under 300 characters where possible for WhatsApp readability.`;
+**Step 1 — Service**
+- Ask: "Which service would you like to book?" and list the available services from the Services Offered section.
+- Wait for the customer to choose before moving on.
+
+**Step 2 — Staff selection** *(only if allow_staff_pick is enabled AND staff members are listed)*
+- Present the numbered team list and ask the customer if they have a preference.
+- If the customer says "no preference" or "anyone", proceed without a staff member.
+- If there are NO staff members listed, skip this step entirely.
+
+**Step 3 — Date**
+- Ask: "What date would you prefer?" (accept natural language like "tomorrow" or "next Friday").
+- Call checkAvailability with the date in YYYY-MM-DD format.
+- Show the available time windows on that date.
+
+**Step 4 — Time**
+- Ask what time within the available window they prefer.
+- Call validateRequestedTime with the requested date + time to verify it falls within a window and has ≥1 hour before slot end.
+- If valid: proceed to Step 5.
+- If invalid: explain why and suggest the next valid option.
+
+**Step 5 — Confirm & Book**
+- Summarise: service, staff (if chosen), date/time. Ask the customer to confirm.
+- Once confirmed, call bookAppointment.
+- Follow the Confirmation Policy after booking.
+
+**Cancellation flow**
+- Call checkExistingBooking to get appointment details.
+- Show the appointment and ask: "Could you please share the reason for the cancellation?"
+- Once they give a reason, call cancelAppointment.
+- NEVER cancel without a reason.
+
+## Tone & Style
+${business?.ai_tone ? `Your communication style is: **${business.ai_tone}**. Maintain this tone in every message.` : "Be warm, professional, and concise."}
+- WhatsApp-friendly format: short paragraphs, emojis where appropriate.
+- Keep responses under 300 words.
+
+## Response Rules
+- Always use the business name "${name}" when referring to the business.
+- When asked about services, list them from the Services Offered section above — do not invent services.
+- ALWAYS call checkExistingBooking before offering new slots.
+- Do NOT book without calling bookAppointment.
+- Do NOT ask about preferred time until you have shown the customer the available windows from checkAvailability.
+- When the customer gives a specific time within a window, call validateRequestedTime before proceeding.
+${!business?.allow_staff_pick ? "- Do NOT ask the customer about staff preferences. Staff assignment is handled internally — never mention team members." : ""}`.trim();
 }
 
 // ── Main: run one agent turn ───────────────────────────────────────
@@ -329,7 +379,7 @@ export async function runAgentTurn(params: AgentParams): Promise<string> {
   const tools = {
     checkExistingBooking: tool({
       description:
-        "Check if this customer already has an upcoming appointment. ALWAYS call this first when a customer wants to book or asks about their appointment.",
+        "Check if this customer already has an active appointment (confirmed or pending). ALWAYS call this first when a customer wants to book, reschedule, or cancel their appointment.",
       inputSchema: z.object({}),
       execute: async () => {
         const { data } = await db
@@ -338,20 +388,25 @@ export async function runAgentTurn(params: AgentParams): Promise<string> {
           .eq("profile_id", profileId)
           .eq("customer_phone", customerPhone)
           .in("status", ["confirmed", "pending"])
-          .gte("scheduled_at", new Date().toISOString())
           .order("scheduled_at", { ascending: true })
           .limit(1)
           .single();
 
         if (!data) return "no_existing_booking";
 
-        return `Customer already has an active booking — Service: ${data.service}, Date/Time: ${new Date(data.scheduled_at).toLocaleString()}, Status: ${data.status}, ID: ${data.id}. Do NOT book another slot. Remind them of this booking. They must cancel it first if they want to reschedule.`;
+        const dt = new Date(data.scheduled_at).toLocaleString("en-US", {
+          timeZone: timezone,
+          weekday: "long", month: "long", day: "numeric",
+          hour: "numeric", minute: "2-digit",
+        });
+
+        return `Customer has an active booking — Service: ${data.service}, Date/Time: ${dt}, Status: ${data.status}, ID: ${data.id}. If the customer wants to cancel, ask for their cancellation reason first, then call cancelAppointment. If they want to book a new slot, remind them they must cancel this one first.`;
       },
     }),
 
     checkAvailability: tool({
       description:
-        "Check which time slots are free on a specific date. Automatically excludes already-booked slots. Call this before booking after confirming the customer has no existing appointment.",
+        "Check which time windows are free on a specific date. Returns available slot WINDOWS (start–end range), not fixed times — customers can request any time within a window. Call this after the customer selects a service and (optionally) a staff member, and picks a date.",
       inputSchema: z.object({
         date: z
           .string()
@@ -415,32 +470,114 @@ export async function runAgentTurn(params: AgentParams): Promise<string> {
           return `All slots on ${dayOfWeek} ${date} are fully booked. Please suggest a different date.`;
         }
 
-        return `Available slots on ${dayOfWeek} ${date}:\n` +
+        return `Available time windows on ${dayOfWeek} ${date}:\n` +
           freeSlots
             .map(
               (s: { label: string; start_time: string; end_time: string }) =>
-                `• ${s.label}: ${s.start_time} – ${s.end_time}`
+                `• ${s.label}: ${s.start_time} – ${s.end_time} (customer can request any start time within this window)`
             )
-            .join("\n");
+            .join("\n") +
+          `\n\nIMPORTANT: These are time WINDOWS, not fixed slots. The customer may choose any start time within a window. ` +
+          `However, the chosen start time must leave at least 1 hour before the window ends. ` +
+          `After the customer picks a time, call validateRequestedTime to verify it.`;
+      },
+    }),
+
+    validateRequestedTime: tool({
+      description:
+        "Validate that a customer's requested appointment time falls within an available slot window AND leaves at least 1 hour before the window ends. Call this when the customer specifies a time after you've shown them available windows via checkAvailability.",
+      inputSchema: z.object({
+        date: z.string().describe("Date in YYYY-MM-DD format"),
+        requestedTime: z.string().describe("The customer's requested time in HH:MM (24h) format, e.g. '09:30'"),
+      }),
+      execute: async (input) => {
+        const { date, requestedTime } = input;
+
+        const dayOfWeek = new Date(`${date}T12:00:00`).toLocaleDateString("en-US", { weekday: "long" });
+
+        const { data: slots } = await db
+          .from("availability_slots")
+          .select("label, start_time, end_time")
+          .eq("profile_id", profileId)
+          .ilike("day_of_week", dayOfWeek);
+
+        if (!slots || slots.length === 0) {
+          return `INVALID: No availability configured for ${dayOfWeek} (${date}).`;
+        }
+
+        const req = parseSlotTime(requestedTime);
+        const reqTotalMins = req.hour * 60 + req.minute;
+
+        // Find a window that contains this time with ≥60 mins remaining
+        const matchingWindow = slots.find((slot: { start_time: string; end_time: string; label: string }) => {
+          const start = parseSlotTime(slot.start_time);
+          const end   = parseSlotTime(slot.end_time);
+          const startMins = start.hour * 60 + start.minute;
+          const endMins   = end.hour * 60 + end.minute;
+          const withinWindow = reqTotalMins >= startMins && reqTotalMins < endMins;
+          const enoughTime   = (endMins - reqTotalMins) >= 60; // at least 1 hour before slot ends
+          return withinWindow && enoughTime;
+        });
+
+        if (matchingWindow) {
+          const fmt = (hhmm: string) => {
+            const { hour, minute } = parseSlotTime(hhmm);
+            const ampm = hour < 12 ? "AM" : "PM";
+            const h12  = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+            return `${h12}:${String(minute).padStart(2, "0")} ${ampm}`;
+          };
+          return `VALID: ${requestedTime} falls within the "${matchingWindow.label}" window (${fmt(matchingWindow.start_time)} – ${fmt(matchingWindow.end_time)}). There is sufficient time (≥1 hr) before this window ends. Proceed to confirm with the customer and then call bookAppointment.`;
+        }
+
+        // Not valid — find the best suggestion
+        const formatSlot = (s: { label: string; start_time: string; end_time: string }) => {
+          const fmt = (hhmm: string) => {
+            const { hour, minute } = parseSlotTime(hhmm);
+            const ampm = hour < 12 ? "AM" : "PM";
+            const h12  = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+            return `${h12}:${String(minute).padStart(2, "0")} ${ampm}`;
+          };
+          // Latest valid start = slot end - 60 mins
+          const end = parseSlotTime(s.end_time);
+          const latestStartMins = (end.hour * 60 + end.minute) - 60;
+          const latestH = Math.floor(latestStartMins / 60);
+          const latestM = latestStartMins % 60;
+          const latestAmpm = latestH < 12 ? "AM" : "PM";
+          const latestH12  = latestH === 0 ? 12 : latestH > 12 ? latestH - 12 : latestH;
+          return `"${s.label}": ${fmt(s.start_time)}–${fmt(s.end_time)} (latest start: ${latestH12}:${String(latestM).padStart(2, "0")} ${latestAmpm})`;
+        };
+
+        const suggestions = slots.map(formatSlot).join("; ");
+        return `INVALID: ${requestedTime} does not fall within an available time window, OR there is less than 1 hour remaining before the window ends. Available windows on ${dayOfWeek} ${date}: ${suggestions}. Please ask the customer to choose a time within one of these windows, keeping at least 1 hour before it ends.`;
       },
     }),
 
     bookAppointment: tool({
-      description:
-        "Record an appointment request for the customer with PENDING status. Only call after confirming availability. The business owner will confirm or cancel it — do NOT tell the customer it is confirmed.",
+      description: context.business?.auto_confirm
+        ? "Book a CONFIRMED appointment immediately. Only call after confirming availability. Tell the customer their appointment is confirmed."
+        : "Record an appointment request for the customer with PENDING status. Only call after confirming availability. The business owner will confirm or cancel it — do NOT tell the customer it is confirmed.",
       inputSchema: z.object({
         customerName: z.string().describe("Full name of the customer"),
         service: z.string().describe("Service they want e.g. 'Hair Styling'"),
         scheduledAt: z
           .string()
           .describe("ISO 8601 datetime e.g. '2026-03-28T10:00:00'"),
-        staffMemberId: z
-          .string()
-          .optional()
-          .describe("ID of the staff member to assign this appointment to. Only set if the customer specifically requested a team member by name."),
+        ...(context.business?.allow_staff_pick
+          ? {
+              staffMemberId: z
+                .string()
+                .optional()
+                .describe("ID of the staff member to assign. Only set if the customer specifically requested a team member by name."),
+            }
+          : {}),
       }),
       execute: async (input) => {
-        const { customerName: name, service, scheduledAt, staffMemberId } = input;
+        const { customerName: name, service, scheduledAt } = input;
+        const staffMemberId = context.business?.allow_staff_pick
+          ? (input as { staffMemberId?: string }).staffMemberId
+          : undefined;
+
+        const autoConfirm = context.business?.auto_confirm ?? false;
 
         // Resolve the staff member name for the notification message
         const assignedStaff = staffMemberId
@@ -455,7 +592,7 @@ export async function runAgentTurn(params: AgentParams): Promise<string> {
             customer_name: name,
             service,
             scheduled_at: scheduledAt,
-            status: "pending",
+            status: autoConfirm ? "confirmed" : "pending",
             assigned_user_id: staffMemberId ?? null,
           })
           .select("id")
@@ -474,7 +611,16 @@ export async function runAgentTurn(params: AgentParams): Promise<string> {
 
         const staffNote = assignedStaff ? ` with ${assignedStaff.name}` : "";
 
-        // Notify the admin dashboard
+        if (autoConfirm) {
+          await db.from("notifications").insert({
+            profile_id: profileId,
+            type: "success",
+            title: "New Appointment Confirmed",
+            message: `${name} booked ${service}${staffNote} for ${displayTime}. Auto-confirmed.`,
+          });
+          return `CONFIRMED appointment booked. ID: ${data.id}. ${name}'s ${service}${staffNote} on ${displayTime} is confirmed. Tell the customer their appointment is confirmed and share the date/time.`;
+        }
+
         await db.from("notifications").insert({
           profile_id: profileId,
           type: "info",
@@ -487,27 +633,40 @@ export async function runAgentTurn(params: AgentParams): Promise<string> {
     }),
 
     cancelAppointment: tool({
-      description: "Cancel an existing appointment by appointment ID (customer-initiated cancellation).",
+      description: "Cancel an existing appointment by appointment ID (customer-initiated cancellation). ONLY call this after the customer has provided a cancellation reason. The reason is REQUIRED.",
       inputSchema: z.object({
         appointmentId: z.string().describe("The UUID of the appointment to cancel"),
-        reason: z.string().optional().describe("Reason the customer is canceling, if provided"),
+        reason: z.string().describe("The reason the customer gave for canceling. This is REQUIRED — do not call this tool without a reason."),
       }),
       execute: async (input) => {
         const { appointmentId, reason } = input;
-        const updatePayload: Record<string, unknown> = {
-          status: "canceled",
-          cancel_reason: reason ?? "Canceled by customer",
-        };
+
+        // Security: verify this appointment belongs to this customer's phone number
+        const { data: existing } = await db
+          .from("appointments")
+          .select("id, customer_name, customer_phone, service, scheduled_at, status")
+          .eq("id", appointmentId)
+          .eq("profile_id", profileId)
+          .eq("customer_phone", customerPhone)
+          .in("status", ["confirmed", "pending"])
+          .single();
+
+        if (!existing) {
+          return "Could not find an active appointment for your number with that ID. Please verify your booking details.";
+        }
+
+        const cancelReason = reason.trim() || "Canceled by customer";
 
         const { data, error } = await db
           .from("appointments")
-          .update(updatePayload)
+          .update({ status: "canceled", cancel_reason: cancelReason })
           .eq("id", appointmentId)
           .eq("profile_id", profileId)
           .select("customer_name, service, scheduled_at")
           .single();
 
         if (error || !data) {
+          // Fallback: update without cancel_reason column (handles missing migration)
           const { data: d2, error: e2 } = await db
             .from("appointments")
             .update({ status: "canceled" })
@@ -515,18 +674,25 @@ export async function runAgentTurn(params: AgentParams): Promise<string> {
             .eq("profile_id", profileId)
             .select("customer_name, service, scheduled_at")
             .single();
-          if (e2 || !d2) return "Could not find that appointment. Please check the ID.";
-          Object.assign(data ?? {}, d2);
+          if (e2 || !d2) return "Something went wrong while canceling your appointment. Please contact us directly.";
         }
 
+        const apptData = data ?? existing;
+        const displayTime = new Date(apptData.scheduled_at).toLocaleString("en-US", {
+          timeZone: timezone,
+          weekday: "long", month: "long", day: "numeric",
+          hour: "numeric", minute: "2-digit",
+        });
+
+        // Notify admin
         await db.from("notifications").insert({
           profile_id: profileId,
           type: "warning",
           title: "Appointment Canceled by Customer",
-          message: `${data?.customer_name}'s ${data?.service} appointment was canceled by the customer.`,
+          message: `${apptData.customer_name}'s ${apptData.service} on ${displayTime} was canceled by the customer. Reason: ${cancelReason}`,
         });
 
-        return `Appointment for ${data?.customer_name} (${data?.service}) has been canceled as requested.`;
+        return `SUCCESS: Appointment for ${apptData.customer_name} (${apptData.service} on ${displayTime}) has been canceled. Reason recorded: "${cancelReason}". Confirm to the customer their appointment is now canceled, share the date/time of the appointment that was canceled, and let them know they can book a new appointment anytime.`;
       },
     }),
   };
@@ -552,5 +718,41 @@ export async function runAgentTurn(params: AgentParams): Promise<string> {
   } catch (err) {
     console.error("[ai-agent] generateText error:", err);
     return "I'm having trouble right now. Please try again in a moment! 🙏";
+  }
+}
+
+// ── Test mode: no session / no DB writes ──────────────────────────
+export async function runTestAgentTurn(
+  profileId: string,
+  message: string,
+  history: { role: "user" | "assistant"; content: string }[]
+): Promise<string> {
+  if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY === "your_openai_api_key") {
+    return "AI assistant is not configured yet (missing OPENAI_API_KEY). Add it to your .env.local to test.";
+  }
+
+  const timezone  = process.env.BUSINESS_TIMEZONE ?? "UTC";
+  const utcOffset = getUTCOffset(timezone);
+
+  const [context, ragChunks] = await Promise.all([
+    loadContext(profileId),
+    fetchRelevantDocs(profileId, message),
+  ]);
+
+  const systemPrompt =
+    buildSystemPrompt(context, ragChunks, "Admin (Test Mode)", timezone, utcOffset) +
+    "\n\n## TEST MODE\nYou are being tested by the business owner. Booking/cancellation tools are disabled in test mode. Focus on answering questions about services, availability, and business info accurately.";
+
+  try {
+    const { text } = await generateText({
+      model: openai("gpt-4o-mini"),
+      system: systemPrompt,
+      messages: [...history, { role: "user", content: message }],
+      stopWhen: stepCountIs(3),
+    });
+    return text.trim() || "I'm not sure how to answer that. Try rephrasing!";
+  } catch (err) {
+    console.error("[test-agent] error:", err);
+    return "Something went wrong. Please try again.";
   }
 }

@@ -11,6 +11,7 @@ export interface Profile {
   id: string;
   business_name: string;
   whatsapp_phone: string;
+  onboarding_completed: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -21,8 +22,23 @@ export interface BusinessDetails {
   description: string;
   ai_tone: string;
   working_hours: string;
+  category: string | null;
+  category_other: string | null;
+  auto_confirm: boolean;
+  allow_staff_pick: boolean;
+  schedule_mode: "daily" | "weekly" | "custom" | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface Service {
+  id: string;
+  profile_id: string;
+  name: string;
+  price: string | null;
+  description: string | null;
+  sort_order: number;
+  created_at: string;
 }
 
 export interface AvailabilitySlot {
@@ -123,6 +139,7 @@ export interface Database {
     Tables: {
       profiles: { Row: Profile; Insert: Omit<Profile, "created_at" | "updated_at">; Update: Partial<Profile> };
       business_details: { Row: BusinessDetails; Insert: Omit<BusinessDetails, "id" | "created_at" | "updated_at">; Update: Partial<BusinessDetails> };
+      services: { Row: Service; Insert: Omit<Service, "id" | "created_at">; Update: Partial<Service> };
       availability_slots: { Row: AvailabilitySlot; Insert: Omit<AvailabilitySlot, "id" | "created_at">; Update: Partial<AvailabilitySlot> };
       training_docs: { Row: TrainingDoc; Insert: Omit<TrainingDoc, "id" | "uploaded_at">; Update: Partial<TrainingDoc> };
       appointments: { Row: Appointment; Insert: Omit<Appointment, "id" | "created_at" | "updated_at">; Update: Partial<Appointment> };
